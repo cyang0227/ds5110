@@ -54,7 +54,7 @@
 | **security_id** | BIGINT (FK → securities) | Stock identifier. |
 | **period_end** | DATE | Fiscal period end date (quarter or year). |
 | **period_type** | TEXT | quarterly or yearly
-| **metric** | TEXT | One of: `pe`, `pb`, `eps`, `market cap`, `net_income`, `equity`, `assets`, `revenue`, `gross_margin`, `operating_margin`. |
+| **metric** | TEXT | One of: `pe`, `pb`, `eps`, `market cap`, `net_income`, `equity`, `assets`, `revenue`, `gross_profit`, `operating_income`. |
 | value | DOUBLE | Metric value. |
 
 **Primary Key:** (`security_id`, `period_end`, `metric`)  

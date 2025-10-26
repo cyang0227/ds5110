@@ -1,6 +1,6 @@
-## 📂 Data Partitioning Rule
+## Data Partitioning Rule
 
-## 📅 Time Range
+## Time Range
 - **Coverage:** From **2017-01-01** to **present (2025-10-26)**  
 - **Universe:** Current S&P 500 Constituents  
 - **Frequency:** Daily (for OHLCV) and Periodic (Quarterly/Annual for fundamentals)  
@@ -21,7 +21,7 @@
 
 ---
 
-## 📂 Directory Structure (Example)
+## Directory Structure (Example)
 
 ```plaintext
 data/
