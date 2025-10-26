@@ -1,5 +1,11 @@
 ## 📂 Data Partitioning Rule
 
+## 📅 Time Range
+- **Coverage:** From **2017-01-01** to **present (2025-10-26)**  
+- **Universe:** Current S&P 500 Constituents  
+- **Frequency:** Daily (for OHLCV) and Periodic (Quarterly/Annual for fundamentals)  
+- **Update Mode:** Incremental append — each run fetches only new data since the last snapshot.
+
 - **Hive-style partitioning (`key=value`)**
 - **Three layers:**
   - `raw` → raw ingestion, unmodified data  
@@ -9,8 +15,8 @@
 ### Partitioning Rules
 | Data Type | Partition Keys | Example Path |
 |------------|----------------|---------------|
-| **Daily prices (OHLCV)** | `year + month` | `year=2025/month=10/part-0000.parquet` |
-| **Fundamentals / Corporate Actions** | `year + month` | `year=2025/month=06/part-0000.parquet` |
+| **Daily prices (OHLCV)** | `year + month` | `year=2025/month=10/part-YYYY-MM-DD.parquet` |
+| **Fundamentals / Corporate Actions** | `year + month` | `year=2025/month=06/part-YYYY-MM-DD.parquet` |
 | **Factor Values (Cross-sectional)** | `trade_date` | `trade_date=2025-10-25/factor_values.parquet` |
 
 ---

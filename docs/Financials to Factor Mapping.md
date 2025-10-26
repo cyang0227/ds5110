@@ -24,5 +24,3 @@ These **nine metrics** fully support the computation of:
 - **Quality factors** → require profitability and efficiency metrics such as `net_income`, `equity`, `assets`, `revenue`, `gross_margin`, `operating_margin`
 
 ---
-
-*Updated: Minimum Viable Financial Dataset v1.1*
