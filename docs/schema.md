@@ -1,9 +1,9 @@
-# 🧱 DS5110 – Factor-Based Stock Tool Schema Summary
+#  DS5110 – Factor-Based Stock Tool Schema Summary
 *(Universe = Current S&P 500 Constituents · Horizon = Last 8 Years)*
 
 ---
 
-## 1️⃣ `securities`
+## 1. `securities`
 | Attribute | Type | Description |
 |------------|------|-------------|
 | **security_id** | BIGINT (PK) | Unique identifier for each stock. |
@@ -17,7 +17,7 @@
 
 ---
 
-## 2️⃣ `prices`
+## 2. `prices`
 | Attribute | Type | Description |
 |------------|------|-------------|
 | **security_id** | BIGINT (FK → securities) | Stock identifier. |
@@ -34,7 +34,7 @@
 
 ---
 
-## 3️⃣ `corporate_actions`
+## 3. `corporate_actions`
 | Attribute | Type | Description |
 |------------|------|-------------|
 | **security_id** | BIGINT (FK → securities) | Stock identifier. |
@@ -48,11 +48,12 @@
 
 ---
 
-## 4️⃣ `fundamentals`
+## 4. `fundamentals`
 | Attribute | Type | Description |
 |---|---|---|
 | **security_id** | BIGINT (FK → securities) | Stock identifier. |
 | **period_end** | DATE | Fiscal period end date (quarter or year). |
+| **period_type** | TEXT | quarterly or yearly
 | **metric** | TEXT | One of: `pe`, `pb`, `eps`, `market cap`, `net_income`, `equity`, `assets`, `revenue`, `gross_margin`, `operating_margin`. |
 | value | DOUBLE | Metric value. |
 
@@ -61,7 +62,7 @@
 
 ---
 
-## 5️⃣ `factor_definitions`
+## 5. `factor_definitions`
 | Attribute | Type | Description |
 |------------|------|-------------|
 | **factor_id** | BIGINT (PK) | Unique identifier for each factor. |
@@ -79,7 +80,7 @@
 
 ---
 
-## 6️⃣ `factor_values`
+## 6. `factor_values`
 | Attribute | Type | Description |
 |------------|------|-------------|
 | **security_id** | BIGINT (FK → securities) | Stock identifier. |
@@ -95,5 +96,3 @@
 **Purpose:** Stores computed factor results in long-form format (one row = one stock × date × factor).
 
 ---
-
-## 🔗 Entity Relationships
