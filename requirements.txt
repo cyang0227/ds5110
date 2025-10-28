@@ -1,0 +1,11 @@
+pandas==2.3.3
+numpy
+pyarrow
+duckdb==1.4.1
+yfinance==0.2.66
+streamlit==1.50.0
+plotly
+matplotlib
+vectorbt
+tqdm
+python-dotenv

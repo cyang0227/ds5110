@@ -8,9 +8,9 @@ ds5110/
 │ ├── curated/ # Cleaned and normalized datasets
 │ └── marts/ # Factor and backtesting layer for analysis / Streamlit
 │
-├── src/ # 💻 Core source code
+├── src/ # Core source code
 │ ├── etl/ # Extract / Transform / Load
-│ │ ├── extract_yfinance.py
+│ │ ├── extract_price.py
 │ │ ├── extract_fundamentals.py
 │ │ ├── extract_corp_actions.py
 │ │ ├── transform_prices.py
@@ -47,7 +47,7 @@ ds5110/
 
 ---
 
-## 📘 Description
+## Description
 
 - **`data/`** — Data lake layers following a `raw → curated → marts` hierarchy.  
   Used for reproducibility and incremental updates.
