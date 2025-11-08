@@ -1,5 +1,5 @@
 #  DS5110 – Factor-Based Stock Tool Schema Summary
-*(Universe = Current S&P 500 Constituents · Horizon = Last 8 Years)*
+*(Universe = Current S&P 500 Constituents (as the end of Oct) · Horizon = Last 8 Years)*
 
 ---
 
