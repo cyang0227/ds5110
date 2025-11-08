@@ -1,3 +1,8 @@
+# ======================================================
+# DS5110 - Fetch S&P 500 Daily Price Data from Yahoo Finance
+# By Chen Yang
+# ======================================================
+
 import yfinance as yf
 import pandas as pd
 from pathlib import Path
