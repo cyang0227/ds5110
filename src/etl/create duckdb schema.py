@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS prices (
     volume BIGINT,
     dividends DOUBLE,
     split_ratio DOUBLE,
-    PRIMARY KEY (security_id, trade_date)
+    PRIMARY KEY (security_id, trade_date),
+    FOREIGN KEY (security_id) REFERENCES securities(security_id)
 );
 """)
 
@@ -57,7 +58,8 @@ CREATE TABLE IF NOT EXISTS corporate_actions (
     action_type TEXT,
     split_ratio DOUBLE,
     cash_amount DOUBLE,
-    PRIMARY KEY (security_id, action_date, action_type)
+    PRIMARY KEY (security_id, action_date, action_type),
+    FOREIGN KEY (security_id) REFERENCES securities(security_id)
 );
 """)
 
@@ -71,7 +73,8 @@ CREATE TABLE IF NOT EXISTS fundamentals (
     period_type TEXT,
     metric TEXT,
     value DOUBLE,
-    PRIMARY KEY (security_id, period_end, metric)
+    PRIMARY KEY (security_id, period_end, metric),
+    FOREIGN KEY (security_id) REFERENCES securities(security_id)
 );
 """)
 
@@ -107,6 +110,8 @@ CREATE TABLE IF NOT EXISTS factor_values (
     calc_run_id TEXT,
     updated_at TIMESTAMP,
     PRIMARY KEY (security_id, trade_date, factor_id)
+    FOREIGN KEY (security_id) REFERENCES securities(security_id),
+    FOREIGN KEY (factor_id) REFERENCES factor_definitions(factor_id)
 );
 """)
 
