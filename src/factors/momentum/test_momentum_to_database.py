@@ -1,6 +1,12 @@
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(ROOT))
+print(f"Added {ROOT} to sys.path")
+
 import duckdb
 from momentum import compute_momentum
-from pathlib import Path
 
 db_path = Path(__file__).resolve().parents[3] / "data" / "warehouse" / "data.duckdb"
 symbols = ['AAPL', 'MSFT', 'NVDA']

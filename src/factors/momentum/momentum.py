@@ -13,7 +13,7 @@ import duckdb
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from factor_db import register_and_insert_factor
+from utils.factor_db import register_and_insert_factor
 
 
 def _validate_inputs(lookback_months: int, skip_months: int, tpm: int) -> None:
