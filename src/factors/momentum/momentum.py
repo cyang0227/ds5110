@@ -13,6 +13,7 @@ import duckdb
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from factor_db import register_and_insert_factor
 
 
 def _validate_inputs(lookback_months: int, skip_months: int, tpm: int) -> None:
@@ -134,59 +135,14 @@ def compute_momentum(
 
     # 5) if save_to_db, register and insert
     if save_to_db:
-        # Ensure supporting tables exist (will error clearly if missing)
-        # Register factor_definitions if needed
-        row = con.execute(
-            "SELECT factor_id FROM factor_definitions WHERE name = ?",
-            [factor_name],
-        ).fetchone()
-
-        if row:
-            factor_id = row[0]
-        else:
-            # Generate next available factor_id manually
-            factor_id = con.execute("SELECT COALESCE(MAX(factor_id), 0) + 1 FROM factor_definitions").fetchone()[0]
-
-            con.execute(
-                """
-                INSERT INTO factor_definitions
-                (factor_id, name, category, params_json, description, version, expression, source, is_active, tags)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    factor_id,
-                    factor_name,
-                    "momentum",
-                    f'{{"lookback_months": {lookback_months}, "skip_months": {skip_months}}}',
-                    f"Price momentum over {lookback_months} months skipping most recent {skip_months} months.",
-                    1,
-                    "momentum = P[t-skip] / P[t-skip-lookback] - 1",
-                    "prices",
-                    True,
-                    "momentum,price",
-                ],
-            )
-    
-        # Prepare DataFrame for insertion
-        df_to_insert = df_factor[["security_id", "trade_date", "value"]].copy()
-        df_to_insert["factor_id"] = factor_id
-        df_to_insert["calc_run_id"] = calc_run_id or f"run_{datetime.now():%Y%m%d_%H%M%S}"
-        df_to_insert["updated_at"] = pd.Timestamp.now()
-
-        # Use a transaction for atomicity
-        con.begin()
-        try:
-            con.register("insert_df", df_to_insert)
-            con.execute(
-                """
-                INSERT INTO factor_values (security_id, trade_date, factor_id, value, zscore_cross, rank_cross, calc_run_id, updated_at)
-                SELECT security_id, trade_date, factor_id, value, NULL, NULL, calc_run_id, updated_at
-                FROM insert_df
-                """
-            )
-            con.commit()
-        except Exception:
-            con.rollback()
-            raise
-
+        factor_meta = {
+            "name": factor_name,
+            "category": "momentum",
+            "params_json": f'{{"lookback_months": {lookback_months}, "skip_months": {skip_months}}}',
+            "description": f"{lookback_months}-month price momentum skipping most recent {skip_months} months.",
+            "expression": f"(P[t-{skip_months}m] / P[t-{skip_months + lookback_months}m]) - 1",
+            "source": "computed from prices table",
+            "tags": "momentum,price",
+        }
+        register_and_insert_factor(con, df_factor, factor_meta, calc_run_id)
     return df_factor
