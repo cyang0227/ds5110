@@ -144,24 +144,30 @@ def compute_momentum(
         if row:
             factor_id = row[0]
         else:
+            # Generate next available factor_id manually
+            factor_id = con.execute("SELECT COALESCE(MAX(factor_id), 0) + 1 FROM factor_definitions").fetchone()[0]
+
             con.execute(
                 """
                 INSERT INTO factor_definitions
-                (name, category, params_json, description, version, expression, source, is_active, tags)
-                VALUES (?, 'momentum', ?, ?, 1, NULL, 'prices', TRUE, 'momentum,price')
+                (factor_id, name, category, params_json, description, version, expression, source, is_active, tags)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
+                    factor_id,
                     factor_name,
-                    f'{{"lookback_months": {lookback_months}, "skip_months": {skip_months}, "tpm": {trading_days_per_month}}}',
-                    f"Total-return momentum over {lookback_months} months skipping {skip_months} months.",
+                    "momentum",
+                    f'{{"lookback_months": {lookback_months}, "skip_months": {skip_months}}}',
+                    f"Price momentum over {lookback_months} months skipping most recent {skip_months} months.",
+                    1,
+                    "momentum = P[t-skip] / P[t-skip-lookback] - 1",
+                    "prices",
+                    True,
+                    "momentum,price",
                 ],
             )
-            # Re-select by unique name to get id (portable across DuckDB versions)
-            factor_id = con.execute(
-                "SELECT factor_id FROM factor_definitions WHERE name = ?",
-                [factor_name],
-            ).fetchone()[0]
-
+    
+        # Prepare DataFrame for insertion
         df_to_insert = df_factor[["security_id", "trade_date", "value"]].copy()
         df_to_insert["factor_id"] = factor_id
         df_to_insert["calc_run_id"] = calc_run_id or f"run_{datetime.now():%Y%m%d_%H%M%S}"
