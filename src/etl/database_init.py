@@ -13,7 +13,7 @@ db_path = db_dir / "data.duckdb"
 
 # Connect to DuckDB (creates file if not exists)
 con = duckdb.connect(database=str(db_path), read_only=False)
-print(f"✅ Connected to DuckDB: {db_path}")
+print(f"Connected to DuckDB: {db_path}")
 
 # ======================================================
 # 1. Table: securities
@@ -117,4 +117,4 @@ CREATE TABLE IF NOT EXISTS factor_values (
 
 # Close connection
 con.close()
-print("✅ Schema created successfully at:", db_path)
+print("Schema created successfully at:", db_path)
