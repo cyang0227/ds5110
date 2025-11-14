@@ -19,7 +19,7 @@ out_path  = os.path.normpath(out_path)
 
 # Ensure file exists
 if not os.path.exists(json_path):
-    raise FileNotFoundError(f"❌ JSON file not found at {json_path}")
+    raise FileNotFoundError(f"JSON file not found at {json_path}")
 with open(json_path, "r") as file:
     mapping = json.load(file)
 
