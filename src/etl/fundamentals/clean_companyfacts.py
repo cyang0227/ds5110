@@ -2,11 +2,8 @@ import json
 import pandas as pd
 from pathlib import Path
 
-INPUT_DIR = Path("data/raw/fundamentals/edgar/companyfacts")
-OUTPUT_PATH = Path("data/curated/fundamentals/edgar_fundamentals.parquet")
-OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-START_YEAR = 2017
+INPUT_DIR = Path("data/raw/fundamental/edgar/companyfacts")
+OUTPUT = Path("data/curated/fundamental/fundamentals_clean.parquet")
 
 FIN_MAP = {
     "net_income": "NetIncomeLoss",
@@ -14,50 +11,47 @@ FIN_MAP = {
     "equity": "StockholdersEquity",
     "revenue": "Revenues",
     "gross_profit": "GrossProfit",
-    "operating_income": "OperatingIncomeLoss",
-    "eps": "EarningsPerShareDiluted"
+    "operating_profit": "OperatingIncomeLoss",
+    "eps": "EarningsPerShareDiluted",
+    "shares_outstanding": "EntityCommonStockSharesOutstanding",
 }
 
-MAP_PATH = Path("data/raw/sec_filing/SP500_cik_mapping.csv")
-df_map = pd.read_csv(MAP_PATH)
-df_map["symbol"] = df_map["symbol"].str.upper()
-CIK_TO_SYMBOL = dict(zip(df_map["cik"].astype(str).str.zfill(10), df_map["symbol"]))
+# Filing priority
+PRIORITY = {
+    "10-K/A": 1,
+    "10-K": 2,
+}
+DEFAULT_PRIORITY = 9
 
 
-def extract_from_json(fp: Path):
-    cik_padded = fp.stem.replace("CIK", "")  # e.g., 0000320193
-    symbol = CIK_TO_SYMBOL.get(cik_padded)
-
-    # This file is not in the mapping (rare), skip
+def extract_one_file(path: Path, cik_map):
+    cik = path.stem.replace("CIK", "")
+    symbol = cik_map.get(cik)
     if not symbol:
-        print(f"[WARN] No symbol found for CIK {cik_padded}")
         return []
 
     try:
-        data = json.loads(fp.read_text())
-    except Exception as e:
-        print("[ERROR] cannot read:", fp.name, e)
+        data = json.loads(path.read_text())
+    except:
         return []
 
     facts = data.get("facts", {}).get("us-gaap", {})
     rows = []
 
     for metric, tag in FIN_MAP.items():
-        if tag not in facts:
-            continue
+        units = facts.get(tag, {}).get("units", {}).get("USD", [])
+        for item in units:
+            form = item.get("form")
+            if form not in ("10-K", "10-K/A"):
+                continue
 
-        items = facts[tag].get("units", {}).get("USD", [])
-        if not items:
-            continue
-
-        for it in items:
-            end = it.get("end")
-            val = it.get("val")
+            end = item.get("end")
+            val = item.get("val")
             if not end or val is None:
                 continue
 
             year = int(end[:4])
-            if year < START_YEAR:
+            if year < 2017:
                 continue
 
             rows.append({
@@ -65,24 +59,47 @@ def extract_from_json(fp: Path):
                 "metric": metric,
                 "period_end": end,
                 "value": val,
-                "period_type": it.get("fp"),
-                "form": it.get("form")
+                "form": form,
+                "priority": PRIORITY.get(form, DEFAULT_PRIORITY),
+                "year": year,
             })
 
     return rows
 
 
 def main():
-    all_rows = []
 
+    # load cik→symbol mapping
+    cik_df = pd.read_csv("data/raw/sec_filing/SP500_cik_mapping.csv")
+    cik_df["cik"] = cik_df["cik"].astype(str).str.zfill(10)
+    cik_map = dict(zip(cik_df["cik"], cik_df["symbol"]))
+
+    # extract
+    all_rows = []
     for fp in INPUT_DIR.glob("CIK*.json"):
-        rows = extract_from_json(fp)
-        all_rows.extend(rows)
+        all_rows.extend(extract_one_file(fp, cik_map))
 
     df = pd.DataFrame(all_rows)
-    df.to_parquet(OUTPUT_PATH)
+    print("Raw rows:", len(df))
 
-    print("Saved:", OUTPUT_PATH, "| rows:", len(df))
+    if df.empty:
+        print("No 10-K data found.")
+        return
+
+    # Keep only best 10-K per symbol + metric + year
+    df_sorted = df.sort_values(["symbol", "metric", "year", "priority"])
+    df_clean = df_sorted.groupby(
+        ["symbol", "metric", "year"], as_index=False
+    ).first()
+
+    # mark annual
+    df_clean["period_type"] = "A"
+
+    df_clean = df_clean[["symbol", "metric", "period_end", "period_type", "value"]]
+
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    df_clean.to_parquet(OUTPUT)
+    print("Saved:", OUTPUT)
 
 
 if __name__ == "__main__":
