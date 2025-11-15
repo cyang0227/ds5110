@@ -10,7 +10,7 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 
-API_KEY = "kETMJlCxls8W8I8b6OLtnt0qgph8Ek24"
+API_KEY = "kETMJlCxls8W8I8b6OLtnt0qgph8Ek24" # demo key; replace with your own for heavy use, premium key only, I know to remove it later
 BASE_URL = "https://financialmodelingprep.com/stable"
 
 # ============================================================
