@@ -184,7 +184,7 @@ def main():
     print(f"Loaded {len(symbols)} symbols from S&P500 list (excluding SPY).")
 
     # 2. Output folders
-    output_dir = ROOT / "data/curated/fundamentals/fmp"
+    output_dir = ROOT / "data/raw/fundamentals/fmp"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     annual_frames = []
