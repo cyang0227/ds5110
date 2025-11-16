@@ -20,16 +20,14 @@ pd.set_option("display.width", 200)
 # In[3]:
 
 
-ROOT = Path.cwd().parent.parent.parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
-annual_path = ROOT / "data/raw/fundamentals/fmp/fundamentals_annual.parquet"
-quarter_path = ROOT / "data/raw/fundamentals/fmp/fundamentals_quarter.parquet"
+annual_path = PROJECT_ROOT / "data/raw/fundamentals/fmp/fundamentals_annual.parquet"
+quarter_path = PROJECT_ROOT / "data/raw/fundamentals/fmp/fundamentals_quarter.parquet"
 
 dfA = pd.read_parquet(annual_path)
 dfQ = pd.read_parquet(quarter_path)
-
-dfA.head(), dfQ.head()
-
 
 # ### 3. Explore Raw Data
 
@@ -69,9 +67,6 @@ dfQ['year'] = pd.to_datetime(dfQ['date'], errors='coerce').dt.year
 dfA = dfA[dfA['year'] >= 2017]
 dfQ = dfQ[dfQ['year'] >= 2017]
 
-dfA.shape, dfQ.shape
-
-
 # ### 6. Clean Quarterly: Pick Latest Quarter per Symbol-Year
 
 # In[8]:
@@ -83,9 +78,6 @@ dfQ_latest = (
        .last()
 )
 
-dfQ_latest.head()
-
-
 # ### 7. Clean Annual: Pick Final Annual Filing per Symbol-Year
 
 # In[9]:
@@ -96,9 +88,6 @@ dfA_latest = (
        .groupby(['symbol', 'year'], as_index=False)
        .last()
 )
-
-dfA_latest.head()
-
 
 # ### 8. Merge annual and quarter data (Annual priority)
 
@@ -112,9 +101,6 @@ df_clean = (
        .groupby(['symbol', 'year'], as_index=False)
        .first()
 )
-
-df_clean.head(20), df_clean.shape
-
 
 # ### 9. Transform wide format to long format
 
@@ -179,7 +165,6 @@ df_long["metric"] = df_long["metric_raw"].map(metric_map)
 df_long = df_long.dropna(subset=["value"])
 
 print("Long format rows:", len(df_long))
-df_long.head(10)
 
 
 # In[18]:
@@ -201,7 +186,7 @@ df_out = df_long[[
 # Save to parquet
 # =============================================
 
-OUTPUT_DIR = ROOT / "data/curated/fundamentals/"
+OUTPUT_DIR = PROJECT_ROOT / "data/curated/fundamentals/"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 df_out.to_parquet(OUTPUT_DIR / "fundamentals_clean.parquet", index=False)
 print("Saved cleaned fundamentals to:", OUTPUT_DIR / "fundamentals_clean.parquet")

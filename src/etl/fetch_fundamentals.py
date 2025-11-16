@@ -5,9 +5,11 @@ https://financialmodelingprep.com/developer/docs/pricing/
 ----------------------------------------------------------
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import pandas as pd
 from pathlib import Path
+from streamlit import empty
 from tqdm import tqdm
 
 API_KEY = "kETMJlCxls8W8I8b6OLtnt0qgph8Ek24" # demo key; replace with your own for heavy use, premium key only, I know to remove it later
@@ -54,6 +56,15 @@ ALL_REQUIRED_FIELDS = (
     + ENTERPRISE_FIELDS
 )
 
+# ============================================================
+# Paths
+# ============================================================
+SCRIPT_DIR = Path(__file__).resolve().parent      # /src/etl
+PROJECT_ROOT = SCRIPT_DIR.parent.parent           # /ds5110
+
+SP500_FILE = PROJECT_ROOT / "data/raw/S&P500.csv"
+OUTPUT_DIR = PROJECT_ROOT / "data/raw/fundamentals/fmp"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ============================================================
 # Normalizer: ensure FMP response is list-of-dicts
@@ -109,27 +120,27 @@ def to_df(data, required_fields, symbol):
 # ============================================================
 # FMP API fetchers
 # ============================================================
-def fetch_income(symbol, period):
+def fetch_income(symbol, period, limit=10):
     per = "" if period == "annual" else "&period=quarter"
-    url = f"{BASE_URL}/income-statement?symbol={symbol}&limit=10{per}&apikey={API_KEY}"
+    url = f"{BASE_URL}/income-statement?symbol={symbol}&limit={limit}{per}&apikey={API_KEY}"
     return normalize_fmp_response(requests.get(url).json())
 
 
-def fetch_balance(symbol, period):
+def fetch_balance(symbol, period, limit=10):
     per = "" if period == "annual" else "&period=quarter"
-    url = f"{BASE_URL}/balance-sheet-statement?symbol={symbol}&limit=10{per}&apikey={API_KEY}"
+    url = f"{BASE_URL}/balance-sheet-statement?symbol={symbol}&limit={limit}{per}&apikey={API_KEY}"
     return normalize_fmp_response(requests.get(url).json())
 
 
-def fetch_cashflow(symbol, period):
+def fetch_cashflow(symbol, period, limit=10):
     per = "" if period == "annual" else "&period=quarter"
-    url = f"{BASE_URL}/cash-flow-statement?symbol={symbol}&limit=10{per}&apikey={API_KEY}"
+    url = f"{BASE_URL}/cash-flow-statement?symbol={symbol}&limit={limit}{per}&apikey={API_KEY}"
     return normalize_fmp_response(requests.get(url).json())
 
 
-def fetch_enterprise(symbol, period):
+def fetch_enterprise(symbol, period, limit=10):
     per = "" if period == "annual" else "&period=quarter"
-    url = f"{BASE_URL}/enterprise-values?symbol={symbol}&limit=10{per}&apikey={API_KEY}"
+    url = f"{BASE_URL}/enterprise-values?symbol={symbol}&limit={limit}{per}&apikey={API_KEY}"
     return normalize_fmp_response(requests.get(url).json())
 
 
@@ -137,7 +148,7 @@ def fetch_enterprise(symbol, period):
 # Build fundamentals for single symbol
 # ============================================================
 def fetch_fundamentals_for_symbol(symbol, period):
-    print(f"Fetching {symbol} ({period})...")
+    tqdm.write(f"Fetching {symbol} fundamentals ({period})...")
 
     inc = to_df(fetch_income(symbol, period), INCOME_FIELDS, symbol)
     bal = to_df(fetch_balance(symbol, period), BALANCE_FIELDS, symbol)
@@ -159,15 +170,25 @@ def fetch_fundamentals_for_symbol(symbol, period):
 
     return df
 
+MAX_RETRY = 3
 
+def fetch_with_retry(symbol, period):
+    for i in range(MAX_RETRY):
+        df = fetch_fundamentals_for_symbol(symbol, period)
+        if not df.empty:
+            return df
+    tqdm.write(f"[ERROR] Giving up on {symbol} ({period}) after retries.")
+    return pd.DataFrame()
+    
 # ============================================================
 # Main
 # ============================================================
+MAX_WORKERS = 1  # Adjust based on your system and API limits
+                 # Better use 1 because of higher rate returns empty data
+
 def main():
 
     # 1. Load S&P500 symbols
-    PROJECT_ROOT = Path(__file__).resolve().parents[1]
-    SP500_FILE = PROJECT_ROOT / "data/raw/S&P500.csv"
     sp500 = pd.read_csv(SP500_FILE)
 
     # Extract Symbol column, drop SPY
@@ -183,21 +204,35 @@ def main():
 
     print(f"Loaded {len(symbols)} symbols from S&P500 list (excluding SPY).")
 
-    # 2. Output folders
-    output_dir = PROJECT_ROOT / "data/raw/fundamentals/fmp"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # 2. Fetch ANNUAL fundamentals concurrently
+    print("\nFetching annual fundamentals (multi-threaded)...")
 
     annual_frames = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
+        futures = {exe.submit(fetch_with_retry, sym, "annual"): sym
+                   for sym in symbols}
+
+        pbar = tqdm(total=len(futures), ncols=80)
+        for fut in as_completed(futures):
+            df = fut.result()
+            annual_frames.append(df)
+            pbar.update(1)
+        pbar.close()
+
+    # 3. Fetch QUARTER fundamentals concurrently
+    print("\nFetching quarterly fundamentals (multi-threaded)...")
+
     quarter_frames = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
+        futures = {exe.submit(fetch_with_retry, sym, "quarter"): sym
+                   for sym in symbols}
 
-    # 3. Fetch fundamentals
-    print("\nFetching annual fundamentals...")
-    for sym in tqdm(symbols):
-        annual_frames.append(fetch_fundamentals_for_symbol(sym, "annual"))
-
-    print("\nFetching quarterly fundamentals...")
-    for sym in tqdm(symbols):
-        quarter_frames.append(fetch_fundamentals_for_symbol(sym, "quarter"))
+        pbar = tqdm(total=len(futures), ncols=80)
+        for fut in as_completed(futures):
+            df = fut.result()
+            quarter_frames.append(df)
+            pbar.update(1)
+        pbar.close()
 
     # 4. Combine
     df_annual = pd.concat(annual_frames, ignore_index=True)
@@ -207,12 +242,9 @@ def main():
     df_annual = df_annual[df_annual["year"] >= 2017]
     df_quarter = df_quarter[df_quarter["year"] >= 2017]
 
-    df_annual.to_parquet(output_dir / "fundamentals_annual.parquet", index=False)
-    df_quarter.to_parquet(output_dir / "fundamentals_quarter.parquet", index=False)
-
-    print("\nSamples:")
-    print(df_annual.head())
-    print(df_quarter.head())
+    # 6. Save to Parquet
+    df_annual.to_parquet(OUTPUT_DIR / "fundamentals_annual.parquet", index=False)
+    df_quarter.to_parquet(OUTPUT_DIR / "fundamentals_quarter.parquet", index=False)
 
     print(f"\nSaved {len(df_annual)} annual rows and {len(df_quarter)} quarterly rows.")
 

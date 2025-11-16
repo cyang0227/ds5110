@@ -6,41 +6,37 @@
 
 import duckdb
 import pandas as pd
-
+from pathlib import Path
 
 # In[3]:
 
 
-DB_PATH = "../../../data/warehouse/data.duckdb"
-PARQUET_PATH = "../../../data/curated/price/prices_clean.parquet"
+SCRIPT_DIR = Path(__file__).resolve().parent          # /ds5110/src/etl
+PROJECT_ROOT = SCRIPT_DIR.parent.parent               # /ds5110
+
+DB_PATH = PROJECT_ROOT / "data/warehouse/data.duckdb"
+PARQUET_PATH = PROJECT_ROOT / "data/curated/prices/prices_clean.parquet"
+
+print("DB PATH:", DB_PATH)
+print("PARQUET:", PARQUET_PATH)
+
 
 con = duckdb.connect(DB_PATH)
 
-
-# In[4]:
-
-
 df = pd.read_parquet(PARQUET_PATH)
-df.head()
-
-
-# In[5]:
-
 
 print(f"Loaded prices parquet: {len(df):,} rows, {df['symbol'].nunique()} symbols")
 
+df = df[[
+    "symbol", "trade_date", "open", "high",
+    "low", "close", "adj_close", "volume"
+]]
 
-# In[14]:
-
-
-cols_keep = ["symbol", "trade_date", "open", "high", "low", "close", "adj_close", "volume"]
-df = df[cols_keep].copy()
 df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
 
+# map symbols to security_id
 
-# In[15]:
-
-
+con = duckdb.connect(str(DB_PATH))
 symbol_map = con.execute(
     """
     SELECT symbol, security_id FROM securities
@@ -48,35 +44,34 @@ symbol_map = con.execute(
 ).fetchdf()
 df = df.merge(symbol_map, on="symbol", how="left")
 
-missing = df[df["security_id"].isna()]["symbol"].unique()
-if len(missing) > 0:
-    print(f"Missing symbols not found in securities table: {len(missing)}")
-    print(missing[:10])
-
-
-
-# In[16]:
-
-
 df = df[["security_id", "trade_date", "open", "high", "low", "close", "adj_close", "volume"]]
 df = df.sort_values(["security_id", "trade_date"])
 
 
-# In[17]:
-
-
+con.register("df", df)
 con.execute("BEGIN TRANSACTION")
 con.execute(
     """
-    INSERT OR REPLACE INTO prices
-    SELECT * FROM df
-    """
-)
+    MERGE INTO prices AS t
+    USING df AS s
+    ON t.security_id = s.security_id
+       AND t.trade_date = s.trade_date
+    WHEN MATCHED THEN UPDATE SET
+        open = s.open,
+        high = s.high,
+        low = s.low,
+        close = s.close,
+        adj_close = s.adj_close,
+        volume = s.volume
+    WHEN NOT MATCHED THEN INSERT (
+        security_id, trade_date, open, high, low,
+        close, adj_close, volume
+    ) VALUES (
+        s.security_id, s.trade_date, s.open, s.high, s.low,
+        s.close, s.adj_close, s.volume
+    );
+""")
 con.execute("COMMIT")
-
-
-# In[18]:
-
 
 print(f"Successfully inserted {len(df):,} rows into 'prices'")
 con.close()

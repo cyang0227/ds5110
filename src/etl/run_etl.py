@@ -4,16 +4,15 @@ This script orchestrates the entire ETL (Extract, Transform, Load) process for t
 
 Pipeline Order:
 1. Initialize DuckDB schema
-2. Transform S&P 500 securities clean file
-3. Load securities into DuckDB
+2. Load securities into DuckDB
 
-4. Fetch S&P500 prices from Yahoo Finance
-5. Transform prices data (raw > curated)
-6. Load prices into DuckDB
+3. Fetch S&P500 prices from Yahoo Finance
+4. Transform prices data (raw > curated)
+5. Load prices into DuckDB
 
-7. Fetch fundamentals data from Financial Modeling Prep
-8. Transform fundamentals data (wide > long)
-9. Load fundamentals into DuckDB
+6. Fetch fundamentals data from Financial Modeling Prep
+7. Transform fundamentals data (wide > long)
+8. Load fundamentals into DuckDB
 
 Usage:
     python run_etl.py
@@ -48,8 +47,8 @@ def run_step(name, cmd, cwd):
 # =============================================
 # Detect ETL directory (this file's parent)
 # =============================================
-SCRIPT_DIR = Path(__file__).parent.resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
 print(f"ETL Script Directory: {SCRIPT_DIR}")
 print(f"Project Root Directory: {PROJECT_ROOT}")
@@ -58,19 +57,31 @@ print(f"Project Root Directory: {PROJECT_ROOT}")
 # Main ETL orchestration logic
 # =============================================
 def run_pipeline(only_prices=False, only_fundamentals=False, incremental=False):
-    # Step 1: Initialize DuckDB schema
-    run_step(
-        "Initialize DuckDB Schema",
-        ["python", "database_init.py"],
-        cwd=SCRIPT_DIR,
-    )
 
-    # Step 2: Load securities into DuckDB
-    run_step(
-        "Load Securities into DuckDB",
-        ["python", "load_securities_to_duckdb.py"],
-        cwd=SCRIPT_DIR,
-    )
+    # Summarize Mode
+    print("\n=============== ETL MODE ===============")
+    print(f" only-prices:{only_prices}")
+    print(f" only-fundamentals:{only_fundamentals}")
+    print(f" incremental:{incremental}")
+    print("========================================\n")
+
+    # =============================================
+    # Full ETL Steps
+    # =============================================
+    if not (only_prices or only_fundamentals or incremental):
+        print("\n===== Full ETL Pipeline =====")
+
+        run_step(
+            "Initialize DuckDB Schema",
+            ["python", "database_init.py"],
+            cwd=SCRIPT_DIR,
+        )
+
+        run_step(
+            "Load Securities into DuckDB",
+            ["python", "load_securities_to_duckdb.py"],
+            cwd=SCRIPT_DIR,
+        )
 
     # =============================================
     # Prices ETL Steps

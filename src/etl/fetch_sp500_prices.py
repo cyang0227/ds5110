@@ -19,6 +19,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ======================================================
+# PATHS
+# ======================================================
+SCRIPT_DIR = Path(__file__).resolve().parent          # /ds5110/src/etl
+PROJECT_ROOT = SCRIPT_DIR.parent.parent               # /ds5110
+
+DATA_DIR = PROJECT_ROOT / "data"
+RAW_SP500 = DATA_DIR / "raw/S&P500.csv"
+PRICE_RAW_DIR = DATA_DIR / "raw/prices/source=yahoo"
+
+# ======================================================
+
 class SP500PriceFetcherBatch:
     def __init__(self, start_date: str = "2017-01-01", end_date: str = None, data_dir: str = "data"):
         self.start_date = start_date
@@ -182,12 +194,12 @@ def main():
     parser.add_argument("--incremental", action="store_true", help="Run incremental update mode")
     args = parser.parse_args()
 
-    fetcher = SP500PriceFetcherBatch(data_dir="data")
+    fetcher = SP500PriceFetcherBatch(data_dir=str(DATA_DIR))
     if args.incremental:
         fetcher.start_date = detect_latest_date(fetcher.raw_dir)
         fetcher.end_date = None
 
-    sp500_df = fetcher.load_sp500_symbols("data/raw/S&P500.csv")
+    sp500_df = fetcher.load_sp500_symbols(str(RAW_SP500))
     symbols = sp500_df["Symbol"].tolist()
     fetcher.collect_data(symbols, delay=0.5)
     fetcher.save_all_data()

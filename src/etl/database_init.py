@@ -7,13 +7,15 @@ import duckdb
 from pathlib import Path
 
 # Define database path (auto-create if missing)
-db_dir = Path("data/warehouse")
-db_dir.mkdir(parents=True, exist_ok=True)
-db_path = db_dir / "data.duckdb"
+SCRIPT_DIR = Path(__file__).resolve().parent      # /src/etl
+PROJECT_ROOT = SCRIPT_DIR.parent.parent           # /ds5110
+DB_DIR = PROJECT_ROOT / "data" / "warehouse"
+DB_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DB_DIR / "data.duckdb"
 
 # Connect to DuckDB (creates file if not exists)
-con = duckdb.connect(database=str(db_path), read_only=False)
-print(f"Connected to DuckDB: {db_path}")
+con = duckdb.connect(database=str(DB_PATH), read_only=False)
+print(f"Connected to DuckDB: {DB_PATH}")
 
 # ======================================================
 # 1. Table: securities
@@ -109,7 +111,7 @@ CREATE TABLE IF NOT EXISTS factor_values (
     rank_cross INTEGER,
     calc_run_id TEXT,
     updated_at TIMESTAMP,
-    PRIMARY KEY (security_id, trade_date, factor_id)
+    PRIMARY KEY (security_id, trade_date, factor_id),
     FOREIGN KEY (security_id) REFERENCES securities(security_id),
     FOREIGN KEY (factor_id) REFERENCES factor_definitions(factor_id)
 );
@@ -117,4 +119,4 @@ CREATE TABLE IF NOT EXISTS factor_values (
 
 # Close connection
 con.close()
-print("Schema created successfully at:", db_path)
+print("Schema created successfully at:", DB_PATH)

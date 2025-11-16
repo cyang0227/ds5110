@@ -12,20 +12,16 @@ import os
 # ===============================
 # Path Configuration
 # ===============================
-print("Current Working Directory:", os.getcwd())
-PARQUET_PATH = Path("data/curated/fundamentals/fundamentals_clean.parquet")
-DB_PATH = Path("data/warehouse/data.duckdb")
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+
+PARQUET_PATH = PROJECT_ROOT / "data/curated/fundamentals/fundamentals_clean.parquet"
+DB_PATH = PROJECT_ROOT / "data/warehouse/data.duckdb"
 
 # ===============================
 # Load Parquet Data
 # ===============================
 df = pd.read_parquet(PARQUET_PATH)
-
-required_cols = {"symbol", "period_end", "period_type", "metric", "value"}
-
-missing = required_cols - set(df.columns)
-if missing:
-    raise ValueError(f"Missing required columns: {missing}")
 
 # Connect to DuckDB and load data
 con = duckdb.connect(DB_PATH)
@@ -47,8 +43,6 @@ symbol_map = con.execute(
     symbols,
 ).fetchdf()
 
-print("fetched symbol to security_id mapping")
-
 df = df.merge(symbol_map, on="symbol", how="inner")
 
 missing_count = df["security_id"].isna().sum()
@@ -62,8 +56,6 @@ df_final = df[[
     "metric",
     "value",
 ]]
-
-print("final dataframe shape:", df_final.shape)
 
 # ================================
 # Insert Data into DuckDB
