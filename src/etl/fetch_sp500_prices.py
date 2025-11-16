@@ -187,7 +187,7 @@ def main():
         fetcher.start_date = detect_latest_date(fetcher.raw_dir)
         fetcher.end_date = None
 
-    sp500_df = fetcher.load_sp500_symbols("S&P500.csv")
+    sp500_df = fetcher.load_sp500_symbols("data/raw/S&P500.csv")
     symbols = sp500_df["Symbol"].tolist()
     fetcher.collect_data(symbols, delay=0.5)
     fetcher.save_all_data()

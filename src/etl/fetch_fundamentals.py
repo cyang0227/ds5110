@@ -166,8 +166,8 @@ def fetch_fundamentals_for_symbol(symbol, period):
 def main():
 
     # 1. Load S&P500 symbols
-    ROOT = Path(__file__).resolve().parent.parent.parent.parent
-    SP500_FILE = ROOT / "data/raw/S&P500.csv"
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    SP500_FILE = PROJECT_ROOT / "data/raw/S&P500.csv"
     sp500 = pd.read_csv(SP500_FILE)
 
     # Extract Symbol column, drop SPY
@@ -184,7 +184,7 @@ def main():
     print(f"Loaded {len(symbols)} symbols from S&P500 list (excluding SPY).")
 
     # 2. Output folders
-    output_dir = ROOT / "data/raw/fundamentals/fmp"
+    output_dir = PROJECT_ROOT / "data/raw/fundamentals/fmp"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     annual_frames = []
