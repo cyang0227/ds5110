@@ -24,7 +24,7 @@ class SP500PriceFetcherBatch:
         self.start_date = start_date
         self.end_date = end_date if end_date else datetime.now().strftime("%Y-%m-%d")
         self.data_dir = Path(data_dir)
-        self.raw_dir = self.data_dir / "raw" / "price" / "source=yahoo"
+        self.raw_dir = self.data_dir / "raw" / "prices" / "source=yahoo"
         self.tmp_dir = self.raw_dir / "tmp"
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
