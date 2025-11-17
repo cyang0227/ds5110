@@ -13,15 +13,53 @@ Schema expectations:
   - factor_values(security_id, trade_date, factor_id, value, zscore_cross, rank_cross, calc_run_id, updated_at)
 """
 
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Dict, Optional
+
 import duckdb
 import pandas as pd
-from datetime import datetime
-from typing import Dict, Optional
+
+
+@dataclass
+class FactorMeta:
+    """
+    Helper dataclass to standardize factor metadata before registration.
+
+    Parameters mirror columns in factor_definitions plus params (as dict)
+    which will be JSON serialized automatically.
+    """
+
+    name: str
+    category: str
+    description: str
+    expression: str
+    source: str
+    tags: str
+    params: Dict[str, Any] = field(default_factory=dict)
+    version: int = 1
+    is_active: bool = True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "category": self.category,
+            "params_json": json.dumps(self.params, sort_keys=True),
+            "description": self.description,
+            "version": self.version,
+            "expression": self.expression,
+            "source": self.source,
+            "is_active": self.is_active,
+            "tags": self.tags,
+        }
 
 def register_and_insert_factor(
         con: duckdb.DuckDBPyConnection,
         df_factor: pd.DataFrame,
-        factor_meta: Dict[str, str],
+        factor_meta: Dict[str, Any],
         calc_run_id: Optional[str] = None,
 ) -> int:
     """

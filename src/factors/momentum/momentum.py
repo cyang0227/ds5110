@@ -13,7 +13,8 @@ import duckdb
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from utils.factor_db import register_and_insert_factor
+from utils.factor_db import FactorMeta, register_and_insert_factor
+from utils.factor_data import load_price_history
 
 
 def _validate_inputs(lookback_months: int, skip_months: int, tpm: int) -> None:
@@ -86,31 +87,8 @@ def compute_momentum(
     """
     _validate_inputs(lookback_months, skip_months, trading_days_per_month)
 
-    # 1) Load and sanitize price data
-    df = con.execute(
-        f"""
-        SELECT security_id, trade_date, {price_col}
-        FROM prices
-        WHERE {price_col} IS NOT NULL
-        ORDER BY security_id, trade_date
-        """
-    ).fetchdf()
-
-    required_cols = {"security_id", "trade_date", price_col}
-    if not required_cols.issubset(df.columns):
-        missing = required_cols - set(df.columns)
-        raise KeyError(f"Missing required columns in prices: {missing}")
-
-    # Ensure correct dtypes and uniqueness
-    df["trade_date"] = pd.to_datetime(df["trade_date"], utc=False)
-    df = (
-        df.dropna(subset=[price_col])
-          .drop_duplicates(subset=["security_id", "trade_date"])
-          .sort_values(["security_id", "trade_date"])
-          .reset_index(drop=True)
-    )
-    if df.empty:
-        raise ValueError("No price data available after cleaning.")
+    # 1) Load and sanitize price data via shared helper
+    df = load_price_history(con, price_col=price_col)
 
     # 2) Window parameters in trading days
     lookback = lookback_months * trading_days_per_month
@@ -135,14 +113,19 @@ def compute_momentum(
 
     # 5) if save_to_db, register and insert
     if save_to_db:
-        factor_meta = {
-            "name": factor_name,
-            "category": "momentum",
-            "params_json": f'{{"lookback_months": {lookback_months}, "skip_months": {skip_months}}}',
-            "description": f"{lookback_months}-month price momentum skipping most recent {skip_months} months.",
-            "expression": f"(P[t-{skip_months}m] / P[t-{skip_months + lookback_months}m]) - 1",
-            "source": "computed from prices table",
-            "tags": "momentum,price",
-        }
-        register_and_insert_factor(con, df_factor, factor_meta, calc_run_id)
+        factor_meta = FactorMeta(
+            name=factor_name,
+            category="momentum",
+            params={
+                "lookback_months": lookback_months,
+                "skip_months": skip_months,
+                "trading_days_per_month": trading_days_per_month,
+                "price_col": price_col,
+            },
+            description=f"{lookback_months}-month price momentum skipping most recent {skip_months} months.",
+            expression=f"(P[t-{skip_months}m] / P[t-{skip_months + lookback_months}m]) - 1",
+            source="computed from prices table",
+            tags="momentum,price",
+        )
+        register_and_insert_factor(con, df_factor, factor_meta.to_dict(), calc_run_id)
     return df_factor
