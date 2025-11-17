@@ -21,7 +21,7 @@ Usage:
     python run_etl.py --incremental (incremental prices + fundamentals)
     python run_etl.py --only-prices --incremental (incremental prices only)
     python run_etl.py --only-fundamentals --incremental (incremental fundamentals only)
-    python run_etl.py --sync-s3 --s3-bucket your-bucket [--s3-prefix ds5110] [--aws-profile default]
+    python run_etl.py --sync-s3 --s3-bucket your-bucket [--s3-prefix project] [--aws-profile default]
 
 """
 
