@@ -15,10 +15,12 @@ Pipeline Order:
 8. Load fundamentals into DuckDB
 
 Usage:
-    python run_etl.py
+    python run_etl.py (full ETL)
     python run_etl.py --only-prices
-    python run_etl.py --only-fundamentals
-    python run_etl.py --incremental (prices only)
+    python run_etl.py --only-fundamentals 
+    python run_etl.py --incremental (incremental prices + fundamentals)
+    python run_etl.py --only-prices --incremental (incremental prices only)
+    python run_etl.py --only-fundamentals --incremental (incremental fundamentals only)
 
 """
 
@@ -116,9 +118,13 @@ def run_pipeline(only_prices=False, only_fundamentals=False, incremental=False):
     if not only_prices:
         print("\n===== Fundamentals ETL Steps =====")
 
+        fund_cmd = ["python", "fetch_fundamentals.py"]
+        if incremental:
+            fund_cmd.append("--incremental")
+
         run_step(
             "Fetch Fundamentals Data",
-            ["python", "fetch_fundamentals.py"],
+            fund_cmd,
             cwd=SCRIPT_DIR,
         )
 
@@ -154,7 +160,7 @@ def main():
     parser.add_argument(
         "--incremental",
         action="store_true",
-        help="Run incremental fetch for prices only.",
+        help="Run incremental fetch for both prices and fundamentals.",
     )
 
     args = parser.parse_args()
@@ -167,5 +173,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-      

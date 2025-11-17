@@ -5,6 +5,7 @@ https://financialmodelingprep.com/developer/docs/pricing/
 ----------------------------------------------------------
 """
 
+import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import pandas as pd
@@ -14,6 +15,8 @@ from tqdm import tqdm
 
 API_KEY = "kETMJlCxls8W8I8b6OLtnt0qgph8Ek24" # demo key; replace with your own for heavy use, premium key only, I know to remove it later
 BASE_URL = "https://financialmodelingprep.com/stable"
+DEFAULT_LIMIT = 10
+INCREMENTAL_LIMIT = 3
 
 # ============================================================
 # Required metrics
@@ -65,6 +68,63 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent           # /ds5110
 SP500_FILE = PROJECT_ROOT / "data/raw/S&P500.csv"
 OUTPUT_DIR = PROJECT_ROOT / "data/raw/fundamentals/fmp"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+ANNUAL_OUTPUT = OUTPUT_DIR / "fundamentals_annual.parquet"
+QUARTER_OUTPUT = OUTPUT_DIR / "fundamentals_quarter.parquet"
+
+# ============================================================
+# Incremental helpers
+# ============================================================
+def detect_latest_date(parquet_path: Path):
+    """Return the latest available date stored in the parquet file."""
+    if not parquet_path.exists():
+        return None
+    try:
+        df = pd.read_parquet(parquet_path, columns=["date"])
+    except Exception as exc:  # pragma: no cover
+        tqdm.write(f"[WARN] Unable to read {parquet_path.name}: {exc}")
+        return None
+
+    series = pd.to_datetime(df["date"], errors="coerce")
+    if series.isna().all():
+        return None
+
+    latest = series.max()
+    if pd.isna(latest):
+        return None
+
+    tqdm.write(f"Detected latest stored date for {parquet_path.name}: {latest.date()}")
+    return latest
+
+
+def filter_newer_than(df: pd.DataFrame, latest_ts):
+    """Keep only rows newer than the provided timestamp."""
+    if latest_ts is None or df.empty:
+        return df
+    dt_series = pd.to_datetime(df["date"], errors="coerce")
+    return df[dt_series > latest_ts]
+
+
+def load_existing_data(parquet_path: Path):
+    if not parquet_path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_parquet(parquet_path)
+    except Exception as exc:  # pragma: no cover
+        tqdm.write(f"[WARN] Unable to load existing data ({parquet_path}): {exc}")
+        return pd.DataFrame()
+
+
+def combine_with_existing(existing: pd.DataFrame, new_rows: pd.DataFrame):
+    if existing.empty:
+        return new_rows.reset_index(drop=True)
+    if new_rows.empty:
+        tqdm.write("No new fundamentals detected; keeping existing dataset.")
+        return existing
+    combined = pd.concat([existing, new_rows], ignore_index=True)
+    # Deduplicate using natural keys
+    combined = combined.drop_duplicates(subset=["symbol", "date", "period"], keep="last")
+    return combined.reset_index(drop=True)
 
 # ============================================================
 # Normalizer: ensure FMP response is list-of-dicts
@@ -120,25 +180,25 @@ def to_df(data, required_fields, symbol):
 # ============================================================
 # FMP API fetchers
 # ============================================================
-def fetch_income(symbol, period, limit=10):
+def fetch_income(symbol, period, limit=DEFAULT_LIMIT):
     per = "" if period == "annual" else "&period=quarter"
     url = f"{BASE_URL}/income-statement?symbol={symbol}&limit={limit}{per}&apikey={API_KEY}"
     return normalize_fmp_response(requests.get(url).json())
 
 
-def fetch_balance(symbol, period, limit=10):
+def fetch_balance(symbol, period, limit=DEFAULT_LIMIT):
     per = "" if period == "annual" else "&period=quarter"
     url = f"{BASE_URL}/balance-sheet-statement?symbol={symbol}&limit={limit}{per}&apikey={API_KEY}"
     return normalize_fmp_response(requests.get(url).json())
 
 
-def fetch_cashflow(symbol, period, limit=10):
+def fetch_cashflow(symbol, period, limit=DEFAULT_LIMIT):
     per = "" if period == "annual" else "&period=quarter"
     url = f"{BASE_URL}/cash-flow-statement?symbol={symbol}&limit={limit}{per}&apikey={API_KEY}"
     return normalize_fmp_response(requests.get(url).json())
 
 
-def fetch_enterprise(symbol, period, limit=10):
+def fetch_enterprise(symbol, period, limit=DEFAULT_LIMIT):
     per = "" if period == "annual" else "&period=quarter"
     url = f"{BASE_URL}/enterprise-values?symbol={symbol}&limit={limit}{per}&apikey={API_KEY}"
     return normalize_fmp_response(requests.get(url).json())
@@ -147,13 +207,13 @@ def fetch_enterprise(symbol, period, limit=10):
 # ============================================================
 # Build fundamentals for single symbol
 # ============================================================
-def fetch_fundamentals_for_symbol(symbol, period):
+def fetch_fundamentals_for_symbol(symbol, period, limit):
     tqdm.write(f"Fetching {symbol} fundamentals ({period})...")
 
-    inc = to_df(fetch_income(symbol, period), INCOME_FIELDS, symbol)
-    bal = to_df(fetch_balance(symbol, period), BALANCE_FIELDS, symbol)
-    cas = to_df(fetch_cashflow(symbol, period), CASHFLOW_FIELDS, symbol)
-    ent = to_df(fetch_enterprise(symbol, period), ENTERPRISE_FIELDS, symbol)
+    inc = to_df(fetch_income(symbol, period, limit), INCOME_FIELDS, symbol)
+    bal = to_df(fetch_balance(symbol, period, limit), BALANCE_FIELDS, symbol)
+    cas = to_df(fetch_cashflow(symbol, period, limit), CASHFLOW_FIELDS, symbol)
+    ent = to_df(fetch_enterprise(symbol, period, limit), ENTERPRISE_FIELDS, symbol)
 
     df = inc.merge(bal, on=["date", "symbol"], how="outer")
     df = df.merge(cas, on=["date", "symbol"], how="outer")
@@ -172,9 +232,9 @@ def fetch_fundamentals_for_symbol(symbol, period):
 
 MAX_RETRY = 3
 
-def fetch_with_retry(symbol, period):
+def fetch_with_retry(symbol, period, limit):
     for i in range(MAX_RETRY):
-        df = fetch_fundamentals_for_symbol(symbol, period)
+        df = fetch_fundamentals_for_symbol(symbol, period, limit)
         if not df.empty:
             return df
     tqdm.write(f"[ERROR] Giving up on {symbol} ({period}) after retries.")
@@ -187,6 +247,19 @@ MAX_WORKERS = 1  # Adjust based on your system and API limits
                  # Better use 1 because of higher rate returns empty data
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Fetch only the latest fundamentals and append to existing datasets."
+    )
+    args = parser.parse_args()
+
+    limit = INCREMENTAL_LIMIT if args.incremental else DEFAULT_LIMIT
+    latest_annual = detect_latest_date(ANNUAL_OUTPUT) if args.incremental else None
+    latest_quarter = detect_latest_date(QUARTER_OUTPUT) if args.incremental else None
+    existing_annual = load_existing_data(ANNUAL_OUTPUT) if args.incremental else pd.DataFrame()
+    existing_quarter = load_existing_data(QUARTER_OUTPUT) if args.incremental else pd.DataFrame()
 
     # 1. Load S&P500 symbols
     sp500 = pd.read_csv(SP500_FILE)
@@ -209,7 +282,7 @@ def main():
 
     annual_frames = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
-        futures = {exe.submit(fetch_with_retry, sym, "annual"): sym
+        futures = {exe.submit(fetch_with_retry, sym, "annual", limit): sym
                    for sym in symbols}
 
         pbar = tqdm(total=len(futures), ncols=80)
@@ -224,7 +297,7 @@ def main():
 
     quarter_frames = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
-        futures = {exe.submit(fetch_with_retry, sym, "quarter"): sym
+        futures = {exe.submit(fetch_with_retry, sym, "quarter", limit): sym
                    for sym in symbols}
 
         pbar = tqdm(total=len(futures), ncols=80)
@@ -242,9 +315,16 @@ def main():
     df_annual = df_annual[df_annual["year"] >= 2017]
     df_quarter = df_quarter[df_quarter["year"] >= 2017]
 
+    if args.incremental:
+        df_annual = filter_newer_than(df_annual, latest_annual)
+        df_quarter = filter_newer_than(df_quarter, latest_quarter)
+
+        df_annual = combine_with_existing(existing_annual, df_annual)
+        df_quarter = combine_with_existing(existing_quarter, df_quarter)
+
     # 6. Save to Parquet
-    df_annual.to_parquet(OUTPUT_DIR / "fundamentals_annual.parquet", index=False)
-    df_quarter.to_parquet(OUTPUT_DIR / "fundamentals_quarter.parquet", index=False)
+    df_annual.to_parquet(ANNUAL_OUTPUT, index=False)
+    df_quarter.to_parquet(QUARTER_OUTPUT, index=False)
 
     print(f"\nSaved {len(df_annual)} annual rows and {len(df_quarter)} quarterly rows.")
 
