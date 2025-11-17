@@ -21,6 +21,7 @@ Usage:
     python run_etl.py --incremental (incremental prices + fundamentals)
     python run_etl.py --only-prices --incremental (incremental prices only)
     python run_etl.py --only-fundamentals --incremental (incremental fundamentals only)
+    python run_etl.py --sync-s3 --s3-bucket your-bucket [--s3-prefix ds5110] [--aws-profile default]
 
 """
 
@@ -28,6 +29,7 @@ import subprocess
 import argparse
 import time
 from pathlib import Path
+from typing import Optional
 
 # =============================================
 # Helper function to run a script
@@ -51,20 +53,63 @@ def run_step(name, cmd, cwd):
 # =============================================
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+RAW_DATA_DIR = DATA_DIR / "raw"
+CURATED_DATA_DIR = DATA_DIR / "curated"
+WAREHOUSE_DATA_DIR = DATA_DIR / "warehouse"
 
 print(f"ETL Script Directory: {SCRIPT_DIR}")
 print(f"Project Root Directory: {PROJECT_ROOT}")
 
+
+def build_s3_uri(bucket: str, prefix: str, suffix: str) -> str:
+    safe_prefix = prefix.strip("/")
+    key = suffix.strip("/")
+    if safe_prefix:
+        return f"s3://{bucket}/{safe_prefix}/{key}"
+    return f"s3://{bucket}/{key}"
+
+
+def sync_data_to_s3(bucket: str, prefix: str, profile: Optional[str] = None):
+    targets = [
+        ("Raw Data", RAW_DATA_DIR, "raw"),
+        ("Curated Data", CURATED_DATA_DIR, "curated"),
+        ("Warehouse", WAREHOUSE_DATA_DIR, "warehouse"),
+    ]
+
+    for label, path, suffix in targets:
+        if not path.exists():
+            print(f"[WARN] Skipping {label}: {path} does not exist.")
+            continue
+        dest = build_s3_uri(bucket, prefix, suffix)
+        cmd = ["aws", "s3", "sync", str(path), dest]
+        if profile:
+            cmd.extend(["--profile", profile])
+        run_step(
+            f"Sync {label} to S3 ({dest})",
+            cmd,
+            cwd=PROJECT_ROOT,
+        )
+
 # =============================================
 # Main ETL orchestration logic
 # =============================================
-def run_pipeline(only_prices=False, only_fundamentals=False, incremental=False):
+def run_pipeline(
+    only_prices=False,
+    only_fundamentals=False,
+    incremental=False,
+    sync_s3=False,
+    s3_bucket: Optional[str] = None,
+    s3_prefix: str = "",
+    aws_profile: Optional[str] = None,
+):
 
     # Summarize Mode
     print("\n=============== ETL MODE ===============")
     print(f" only-prices:{only_prices}")
     print(f" only-fundamentals:{only_fundamentals}")
     print(f" incremental:{incremental}")
+    print(f" sync-s3:{sync_s3}")
     print("========================================\n")
 
     # =============================================
@@ -140,6 +185,12 @@ def run_pipeline(only_prices=False, only_fundamentals=False, incremental=False):
             cwd=SCRIPT_DIR,
         )
 
+    if sync_s3:
+        if not s3_bucket:
+            raise ValueError("--s3-bucket is required when --sync-s3 is enabled.")
+        print("\n===== S3 Sync =====")
+        sync_data_to_s3(s3_bucket, s3_prefix, aws_profile)
+
     print("\nETL Pipeline Completed Successfully!")
 
 # =============================================
@@ -162,6 +213,27 @@ def main():
         action="store_true",
         help="Run incremental fetch for both prices and fundamentals.",
     )
+    parser.add_argument(
+        "--sync-s3",
+        action="store_true",
+        help="After ETL, sync raw/curated/warehouse data folders to S3.",
+    )
+    parser.add_argument(
+        "--s3-bucket",
+        type=str,
+        help="Destination S3 bucket when --sync-s3 is enabled.",
+    )
+    parser.add_argument(
+        "--s3-prefix",
+        type=str,
+        default="project",
+        help="Key prefix inside the bucket for S3 sync (default: project).",
+    )
+    parser.add_argument(
+        "--aws-profile",
+        type=str,
+        help="AWS CLI profile to use for S3 sync.",
+    )
 
     args = parser.parse_args()
 
@@ -169,6 +241,10 @@ def main():
         only_prices=args.only_prices,
         only_fundamentals=args.only_fundamentals,
         incremental=args.incremental,
+        sync_s3=args.sync_s3,
+        s3_bucket=args.s3_bucket,
+        s3_prefix=args.s3_prefix,
+        aws_profile=args.aws_profile,
     )
 
 if __name__ == "__main__":
