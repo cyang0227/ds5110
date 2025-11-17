@@ -1,5 +1,4 @@
-# Metric → Factor Mapping (Full Version)
-
+# Metric → Factor Mapping
 This document provides a complete mapping between financial **metrics** 
 and the **factor categories** commonly used in quantitative investing:
 Value, Quality, Growth, Efficiency, Leverage, and Size.
@@ -99,14 +98,10 @@ Size:
 
 ## 📌 7. Recommended FMP API Endpoints
 
-To collect all metrics above, you will need:
-
 - **Income Statement** (annual + quarterly)  
 - **Balance Sheet** (annual + quarterly)  
 - **Cashflow Statement** (annual + quarterly)  
 - **Key Metrics** (for shares outstanding)  
 - **Quote** API (for market cap / price)  
-
-These cover 100% of the metrics required for a professional multi-factor model.
 
 ---
