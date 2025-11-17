@@ -246,6 +246,10 @@ def fetch_with_retry(symbol, period, limit):
 MAX_WORKERS = 1  # Adjust based on your system and API limits
                  # Better use 1 because of higher rate returns empty data
 
+FILTER_YEAR = 2000
+DEFALUT_LIMIT_ANNUAL = 20
+DEFAULT_LIMIT_QUARTER = 80
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -282,7 +286,7 @@ def main():
 
     annual_frames = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
-        futures = {exe.submit(fetch_with_retry, sym, "annual", limit): sym
+        futures = {exe.submit(fetch_with_retry, sym, "annual", DEFALUT_LIMIT_ANNUAL): sym
                    for sym in symbols}
 
         pbar = tqdm(total=len(futures), ncols=80)
@@ -297,7 +301,7 @@ def main():
 
     quarter_frames = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
-        futures = {exe.submit(fetch_with_retry, sym, "quarter", limit): sym
+        futures = {exe.submit(fetch_with_retry, sym, "quarter", DEFAULT_LIMIT_QUARTER): sym
                    for sym in symbols}
 
         pbar = tqdm(total=len(futures), ncols=80)
@@ -311,9 +315,9 @@ def main():
     df_annual = pd.concat(annual_frames, ignore_index=True)
     df_quarter = pd.concat(quarter_frames, ignore_index=True)
 
-    # 5. Filter data from 2017 onwards
-    df_annual = df_annual[df_annual["year"] >= 2017]
-    df_quarter = df_quarter[df_quarter["year"] >= 2017]
+    # 5. Filter data from FILTER_YEAR onwards
+    df_annual = df_annual[df_annual["year"] >= FILTER_YEAR]
+    df_quarter = df_quarter[df_quarter["year"] >= FILTER_YEAR]
 
     if args.incremental:
         df_annual = filter_newer_than(df_annual, latest_annual)
