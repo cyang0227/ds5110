@@ -1,0 +1,8 @@
+name: ds5110
+channels:
+  - defaults
+dependencies:
+  - python=3.13
+  - ipykernel
+  - notebook
+  - pip
