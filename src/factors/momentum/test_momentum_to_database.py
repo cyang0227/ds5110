@@ -19,15 +19,15 @@ CREATE OR REPLACE VIEW prices_subset AS
 SELECT p.*
 FROM prices p
 JOIN securities s ON p.security_id = s.security_id
-WHERE s.symbol IN ({symbol_list})
+
 """)
 
 df_factor = compute_momentum(
     con,
-    lookback_months=3,
+    lookback_months=12,
     skip_months=1,
     save_to_db=True,
-    calc_run_id="test_subset_003",
+    calc_run_id="test_momentum_004",
     price_col="adj_close",
 )
 
