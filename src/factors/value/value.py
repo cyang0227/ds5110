@@ -110,17 +110,21 @@ def compute_value_factors(
         price_col=price_col,
     )
 
+    # ------------------------------------------------------------
+    # Filter out security_id = 504
+    # ------------------------------------------------------------
+    if not df_all.empty and "security_id" in df_all.columns:
+        df_all = df_all[df_all["security_id"] != 504].copy()
+
     # === DEBUG START ===
     print(f"DEBUG: Loaded df_all shape: {df_all.shape}")
     if df_all.empty:
         print("DEBUG: df_all is empty immediately after loading!")
-        return pd.DataFrame() # 提前结束
+        return pd.DataFrame()
 
-    # 检查关键列是否有 NaN
     print("DEBUG: NaNs per column:")
     print(df_all[metrics].isna().sum())
     
-    # 检查是否有任何一行完全具备计算条件
     valid_rows = df_all.dropna(subset=["market_capitalization", "eps"])
     print(f"DEBUG: Rows with valid Market Cap and EPS: {len(valid_rows)}")
     # === DEBUG END ===

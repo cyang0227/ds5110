@@ -130,10 +130,10 @@ def merge_prices_and_fundamentals(
     """
     df_prices["trade_date"] = pd.to_datetime(df_prices["trade_date"])
     df_fund["period_end"] = pd.to_datetime(df_fund["period_end"])
+    
     results = []
 
     # process security by security
-    # Grouping by security_id works safely now that both are int64
     for sid, dfp in df_prices.groupby("security_id"):
         dff = df_fund[df_fund["security_id"] == sid]
 
@@ -145,11 +145,14 @@ def merge_prices_and_fundamentals(
         dfp = dfp.sort_values("trade_date").reset_index(drop=True)
         dff = dff.sort_values("period_end").reset_index(drop=True)
 
+        # Drop security_id from dff to avoid suffixing (security_id_x, security_id_y)
+        dff_clean = dff.drop(columns=["security_id"])
+
         # Merge logic
         try:
             merged = pd.merge_asof(
                 dfp,
-                dff,
+                dff_clean,
                 left_on="trade_date",
                 right_on="period_end",
                 direction="backward",
@@ -157,7 +160,6 @@ def merge_prices_and_fundamentals(
             )
             results.append(merged)
         except Exception as e:
-            # If merge fails (shouldn't happen with type fixes), return prices only
             print(f"Warning: Merge failed for SID {sid}: {e}")
             results.append(dfp)
 
