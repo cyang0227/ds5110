@@ -73,3 +73,4 @@ def load_price_history(
         raise ValueError(f"No price data available in {table_name}.")
 
     return df
+

@@ -24,10 +24,10 @@ JOIN securities s ON p.security_id = s.security_id
 
 df_factor = compute_momentum(
     con,
-    lookback_months=12,
+    lookback_months=3,
     skip_months=1,
     save_to_db=True,
-    calc_run_id="test_momentum_004",
+    calc_run_id="test_momentum_001",
     price_col="adj_close",
 )
 
