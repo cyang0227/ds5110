@@ -1,155 +1,278 @@
 """
-Value factor computation module.
+Value factor computation (dynamic composite or single mode).
 
-Implements:
-- Earnings Yield (eps / price)
-- PE Inverse (1 / pe)
-- PB Inverse (1 / pb)
-- Size Inverse (1 / market_cap)
+Supports:
+    mode = "composite"  → compute custom composite of selected sub-factors
+    mode = "single"     → compute individual sub-factors
+
+Composite is computed as the mean of per-date z-scores of the selected sub-factors.
 
 Author: Chen Yang
 """
 
-from __future__ import annotations
+from typing import Optional, List, Union
 import duckdb
 import pandas as pd
 import numpy as np
-from datetime import datetime
-from utils.factor_db import FactorMeta, register_and_insert_factor
-from utils.factor_data import load_fundamentals_daily
 
-# =====================================
-# Helper: Save factor to DuckDB
-# =====================================
-def _save_factor(con, df, name, description, expression, params=None, calc_run_id=None):
-    meta = FactorMeta(
-        name=name,
-        category="value",
-        description=description,
-        expression=expression,
-        source="fundamentals + prices",
-        tags="value",
-        params=params or {},
+from src.utils.factor_data import load_prices_with_fundamentals
+from src.utils.factor_postprocess import postprocess_factor
+from src.utils.factor_db import FactorMeta, register_and_insert_factor
+
+
+# ------------------------------------------------------------
+# safe zscore
+# ------------------------------------------------------------
+def _zscore(x: pd.Series) -> pd.Series:
+    mu = x.mean()
+    sd = x.std(ddof=0)
+    if sd == 0 or np.isnan(sd):
+        return pd.Series(np.zeros(len(x)), index=x.index)
+    return (x - mu) / sd
+
+
+# ------------------------------------------------------------
+# API
+# ------------------------------------------------------------
+def compute_value_factors(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    mode: str = "composite",   
+    composite_factors: Union[str, List[str]] = "all",  
+    factors: Optional[List[str]] = None,                  
+    save_to_db: bool = False,
+    calc_run_id: Optional[str] = None,
+    price_col: str = "adj_close",
+) -> pd.DataFrame:
+    """
+    Compute Value factors.
+
+    Parameters
+    ----------
+    mode : "composite" | "single"
+        composite → combine selected sub-factors. A composite factor mixed with sub-factors to combine to a more stable, predictable factor
+        single    → return selected individual sub-factors. Every single sub-factor will have a factor_id
+
+    composite_factors : list[str] or "all"
+        If mode == composite:
+            - "all"  → use all sub-factors
+            - list   → custom list of sub-factors
+
+    factors : list[str]
+        If mode == single:
+            list of sub-factors to compute
+
+    Returns a DataFrame of processed factors, ready to insert into DB.
+
+    Examples:
+    ---------
+    compute_value_factors(
+    con,
+    mode="composite",
+    composite_factors=["earnings_yield", "book_to_market"],
+    save_to_db=True
     )
-    register_and_insert_factor(con, df, meta.to_dict(), calc_run_id)
 
+    compute_value_factors(
+    con,
+    mode="single",
+    factors=["earnings_yield", "sales_to_price"],
+    save_to_db=True)
+    """
 
-# ============================================
-# 1. Book-to-Market (BM) = equity / market_cap
-# ============================================
-def compute_value_bm(con, *, save_to_db=False, calc_run_id=None):
-    """
-    Book-to-Market value (value_bm)
-        BM = total_stockholders_equity / market_capitalization
-    Equivalent to inverse PB
-    """
-    df = load_fundamentals_daily(con, metrics=["total_stockholders_equity", "market_capitalization"])
+    # ------------------------------------------------------------
+    # 1. unify metrics
+    # ------------------------------------------------------------
+    sub_factors_all = [
+        "earnings_yield",
+        "book_to_market",
+        "free_cash_flow_yield",
+        "sales_to_price",
+        "operating_income_yield",
+    ]
+
+    # ------------------------------------------------------------
+    # 2. load price + fundamentals once
+    # ------------------------------------------------------------
+    metrics = [
+        "eps",
+        "total_stockholders_equity",
+        "market_capitalization",
+        "free_cash_flow",
+        "revenue",
+        "operating_income",
+        "enterprise_value",
+    ]
+
+    df_all = load_prices_with_fundamentals(
+        con,
+        metrics=metrics,
+        price_col=price_col,
+    )
+
+    # === DEBUG START ===
+    print(f"DEBUG: Loaded df_all shape: {df_all.shape}")
+    if df_all.empty:
+        print("DEBUG: df_all is empty immediately after loading!")
+        return pd.DataFrame() # 提前结束
+
+    # 检查关键列是否有 NaN
+    print("DEBUG: NaNs per column:")
+    print(df_all[metrics].isna().sum())
     
-    df["value"] = df["value"] = df["total_stockholders_equity"] / df["market_capitalization"]
-    df["value"] = df["value"].replace([np.inf, -np.inf], np.nan)
-    out = df.loc[df["value"].notna(), ["security_id", "trade_date", "value"]]
+    # 检查是否有任何一行完全具备计算条件
+    valid_rows = df_all.dropna(subset=["market_capitalization", "eps"])
+    print(f"DEBUG: Rows with valid Market Cap and EPS: {len(valid_rows)}")
+    # === DEBUG END ===
 
-    if save_to_db:
-        _save_factor(
-            con,
-            out,
-            name="value_bm",
-            description="Book-to-Market = total_stockholders_equity / market_capitalization",
-            expression= "total_stockholders_equity / market_capitalization",
-            params={"metrics": ["total_stockholders_equity", "market_capitalization"]},
-            calc_run_id=calc_run_id
-        )
-    return out
+    price = df_all[price_col]
+    mc = df_all["market_capitalization"]
+    ev = df_all["enterprise_value"]
 
-# =========================================
-# 2. Earnings Yield = NetIncome / MarketCap
-# =========================================
-
-def compute_value_earnings_yield(con, *, save_to_db=False, calc_run_id=None):
-    """
-    Earnings Yield (inverse PE):
-        EY = net_income / market_capitalization
-    """
-    df = load_fundamentals_daily(
-        con,
-        metrics=["net_income", "market_capitalization"]
+    # ------------------------------------------------------------
+    # 3. compute raw sub-factors
+    # ------------------------------------------------------------
+    df_all["earnings_yield"] = np.where(
+        (price > 0) & np.isfinite(price),
+        df_all["eps"] / price,
+        np.nan,
     )
 
-    df["value"] = df["net_income"] / df["market_capitalization"]
-    df["value"] = df["value"].replace([np.inf, -np.inf], np.nan)
-    out = df.loc[df["value"].notna(), ["security_id", "trade_date", "value"]]
-
-    if save_to_db:
-        _save_factor(
-            con,
-            out,
-            name="value_earnings_yield",
-            description="Earnings Yield = net_income / market_capitalization",
-            expression="net_income / market_capitalization",
-            params={"metrics": ["net_income", "market_capitalization"]},
-            calc_run_id=calc_run_id,
-        )
-    return out
-
-
-
-# =========================================
-# 3. Free Cash Flow Yield = FCF / MarketCap
-# =========================================
-
-def compute_value_fcf_yield(con, *, save_to_db=False, calc_run_id=None):
-    """
-    Free Cash Flow Yield:
-        FCFY = free_cash_flow / market_capitalization
-    """
-    df = load_fundamentals_daily(
-        con,
-        metrics=["free_cash_flow", "market_capitalization"]
+    df_all["book_to_market"] = np.where(
+        (mc > 0) & np.isfinite(mc),
+        df_all["total_stockholders_equity"] / mc,
+        np.nan,
     )
 
-    df["value"] = df["free_cash_flow"] / df["market_capitalization"]
-    df["value"] = df["value"].replace([np.inf, -np.inf], np.nan)
-    out = df.loc[df["value"].notna(), ["security_id", "trade_date", "value"]]
-
-    if save_to_db:
-        _save_factor(
-            con,
-            out,
-            name="value_fcf_yield",
-            description="Free Cash Flow Yield = free_cash_flow / market_capitalization",
-            expression="free_cash_flow / market_capitalization",
-            params={"metrics": ["free_cash_flow", "market_capitalization"]},
-            calc_run_id=calc_run_id,
-        )
-    return out
-
-
-
-# ============================================================
-# 4. Sales Yield (Sales-to-Price) = revenue / MarketCap
-# ============================================================
-
-def compute_value_sales_yield(con, *, save_to_db=False, calc_run_id=None):
-    """
-    Sales Yield:
-        SY = revenue / market_capitalization
-    """
-    df = load_fundamentals_daily(
-        con,
-        metrics=["revenue", "market_capitalization"]
+    df_all["free_cash_flow_yield"] = np.where(
+        (mc > 0) & np.isfinite(mc),
+        df_all["free_cash_flow"] / mc,
+        np.nan,
     )
 
-    df["value"] = df["revenue"] / df["market_capitalization"]
-    out = df.loc[df["value"].notna(), ["security_id", "trade_date", "value"]]
+    df_all["sales_to_price"] = np.where(
+        (mc > 0) & np.isfinite(mc),
+        df_all["revenue"] / mc,
+        np.nan,
+    )
 
-    if save_to_db:
-        _save_factor(
-            con,
-            out,
-            name="value_sales_yield",
-            description="Sales Yield = revenue / market_capitalization",
-            expression="revenue / market_capitalization",
-            params={"metrics": ["revenue", "market_capitalization"]},
-            calc_run_id=calc_run_id,
+    df_all["operating_income_yield"] = np.where(
+        (ev > 0) & np.isfinite(ev),
+        df_all["operating_income"] / ev,
+        np.nan,
+    )
+
+    # ------------------------------------------------------------
+    # 4. composite mode
+    # ------------------------------------------------------------
+    if mode == "composite":
+        # determine which sub-factors to use
+        if composite_factors == "all":
+            selected = sub_factors_all
+        else:
+            unknown = set(composite_factors) - set(sub_factors_all)
+            if unknown:
+                raise ValueError(f"Unknown composite sub-factors: {unknown}")
+            selected = composite_factors
+
+        # compute zscore for selected factors
+        zcols = []
+        for sf in selected:
+            zcol = f"{sf}_z"
+            df_all[zcol] = df_all.groupby("trade_date")[sf].transform(_zscore)
+            zcols.append(zcol)
+
+        # composite = mean of selected z-scores
+        df_all["value_composite_dynamic"] = df_all[zcols].mean(
+        axis=1,
+        skipna=True,
         )
-    return out
+
+        df_factor = (
+            df_all.loc[
+                ~df_all["value_composite_dynamic"].isna(),
+                ["security_id", "trade_date", "value_composite_dynamic"],
+            ]
+            .rename(columns={"value_composite_dynamic": "value"})
+            .reset_index(drop=True)
+        )
+
+        df_factor = df_factor.dropna(subset=["security_id"]).copy()
+        df_factor["security_id"] = df_factor["security_id"].astype("int64")
+
+        # dynamic factor name
+        if composite_factors == "all":
+            factor_name = "value_composite_all"
+        else:
+            factor_name = "value_composite_" + "_".join(selected)
+
+        df_factor["factor_name"] = factor_name
+
+        # post-process (zscore_cross + sector-neutral)
+        df_factor = postprocess_factor(con, df_factor)
+
+        # write to DB
+        if save_to_db:
+            meta = FactorMeta(
+                name=factor_name,
+                category="value",
+                params={"components": selected},
+                description=f"Composite of sub-factors: {selected}",
+                expression="mean(z-subfactors)",
+                source="fundamentals + prices",
+                tags="value,composite",
+            )
+            register_and_insert_factor(con, df_factor, meta.to_dict(), calc_run_id)
+
+        return df_factor
+
+    # ------------------------------------------------------------
+    # 5. single mode
+    # ------------------------------------------------------------
+    elif mode == "single":
+        if factors is None:
+            raise ValueError("Must pass factors=[...] in single mode.")
+
+        unknown = set(factors) - set(sub_factors_all)
+        if unknown:
+            raise ValueError(f"Unknown single sub-factors: {unknown}")
+
+        outputs = []
+
+        for sf in factors:
+            tmp = (
+                df_all.loc[
+                    ~df_all[sf].isna(),
+                    ["security_id", "trade_date", sf],
+                ]
+                .rename(columns={sf: "value"})
+                .reset_index(drop=True)
+            )
+            tmp["factor_name"] = sf
+
+            tmp = tmp.dropna(subset=["security_id"]).copy()
+            tmp["security_id"] = tmp["security_id"].astype("int64")
+
+            tmp = postprocess_factor(con, tmp)
+
+            if save_to_db:
+                meta = FactorMeta(
+                    name=sf,
+                    category="value",
+                    params={"metric": sf},
+                    description=f"Value single-factor: {sf}",
+                    expression=sf,
+                    source="fundamentals + prices",
+                    tags="value,single",
+                )
+                register_and_insert_factor(con, tmp, meta.to_dict(), calc_run_id)
+
+            outputs.append(tmp)
+
+        return pd.concat(outputs, ignore_index=True)
+
+    # ------------------------------------------------------------
+    # 6. Invalid mode
+    # ------------------------------------------------------------
+    else:
+        raise ValueError("mode must be 'composite' or 'single'")
