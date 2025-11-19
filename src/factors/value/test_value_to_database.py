@@ -37,15 +37,16 @@ print(df_factor.groupby("security_id")["trade_date"].agg(["min","max","count"]))
 # --------------------------------------------------------------------
 # Example: also compute SINGLE value factors
 # --------------------------------------------------------------------
+
 df_single = compute_value_factors(
     con,
     mode="single",
     factors=[
         "earnings_yield",
         "book_to_market",
-        # "free_cash_flow_yield",
-        # "sales_to_price",
-        # "operating_income_yield",
+        "free_cash_flow_yield",
+        "sales_to_price",
+        "operating_income_yield",
     ],
     save_to_db=True,
     calc_run_id="test_value_single_001",

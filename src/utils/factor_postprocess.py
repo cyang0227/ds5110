@@ -10,11 +10,18 @@ def _zscore(x: pd.Series) -> pd.Series:
         return pd.Series(np.zeros(len(x)), index=x.index)
     return (x - mu) / sigma
 
+def _winsorize_series(x: pd.Series, limits=(0.01, 0.01)) -> pd.Series:
+    lower = x.quantile(limits[0])
+    upper = x.quantile(1 - limits[1])
+    return x.clip(lower, upper)
+
 def postprocess_factor(
     con: duckdb.DuckDBPyConnection,
     df_factor: pd.DataFrame,
     *,
     enable_sector_neutral: bool = True,
+    enable_winsorize: bool = True,
+    enable_log: bool = False
 ) -> pd.DataFrame:
     """
     Unified cross-sectional factor post-processing pipeline.
@@ -30,6 +37,16 @@ def postprocess_factor(
         - zscore_cross_sector (if enabled)
         - rank_cross_sector (if enabled)
     """
+    # === Log ===
+    if enable_log:
+        mask_pos = df_factor["value"] > 0
+        df_factor.loc[mask_pos, "value"] = np.log(df_factor.loc[mask_pos, "value"])
+        df_factor.loc[~mask_pos, "value"] = np.nan
+
+    # === Winsorize ===
+    df_factor["value"] = df_factor.groupby("trade_date")["value"].transform(
+        lambda x: _winsorize_series(x)
+    ) 
 
     # === Whole Market Z-score ===
     df_factor["zscore_cross"] = (

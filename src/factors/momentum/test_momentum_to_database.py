@@ -35,4 +35,43 @@ print(df_factor.groupby("security_id")["trade_date"].agg(['min','max','count']))
 
 print(df_factor.head())
 
+df_factor = compute_momentum(
+    con,
+    lookback_months=6,
+    skip_months=1,
+    save_to_db=True,
+    calc_run_id="test_momentum_001",
+    price_col="adj_close",
+)
+
+print(df_factor.groupby("security_id")["trade_date"].agg(['min','max','count']))
+
+print(df_factor.head())
+
+df_factor = compute_momentum(
+    con,
+    lookback_months=9,
+    skip_months=1,
+    save_to_db=True,
+    calc_run_id="test_momentum_001",
+    price_col="adj_close",
+)
+
+print(df_factor.groupby("security_id")["trade_date"].agg(['min','max','count']))
+
+print(df_factor.head())
+
+df_factor = compute_momentum(
+    con,
+    lookback_months=12,
+    skip_months=1,
+    save_to_db=True,
+    calc_run_id="test_momentum_001",
+    price_col="adj_close",
+)
+
+print(df_factor.groupby("security_id")["trade_date"].agg(['min','max','count']))
+
+print(df_factor.head())
+
 con.close()

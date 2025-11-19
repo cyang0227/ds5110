@@ -243,6 +243,8 @@ def compute_value_factors(
 
         outputs = []
 
+        factors_need_log = ["sales_to_price"]
+
         for sf in factors:
             tmp = (
                 df_all.loc[
@@ -257,7 +259,8 @@ def compute_value_factors(
             tmp = tmp.dropna(subset=["security_id"]).copy()
             tmp["security_id"] = tmp["security_id"].astype("int64")
 
-            tmp = postprocess_factor(con, tmp)
+            should_log = sf in factors_need_log
+            tmp = postprocess_factor(con, tmp, enable_log=should_log)
 
             if save_to_db:
                 meta = FactorMeta(
