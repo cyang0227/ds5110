@@ -206,3 +206,133 @@ def load_prices_with_fundamentals(
         df_merged[fund_cols] = df_merged.groupby("security_id")[fund_cols].ffill()
 
     return df_merged
+
+
+# ===============================================
+# VectorBT Helpers: Load data in Wide Format
+# ===============================================
+def load_ohlcv_wide(
+    con: duckdb.DuckDBPyConnection,
+    start_date: str = "2017-01-01",
+    end_date: str | None = None,
+    columns: List[str] | None = None,
+    security_ids: List[int] | None = None,
+) -> pd.DataFrame:
+    """
+    Load OHLCV data and pivot to wide format with MultiIndex columns.
+    
+    Returns:
+        pd.DataFrame: 
+            Index = trade_date
+            Columns = MultiIndex(Variable, security_id)
+            
+    Example:
+        df['adj_close'] returns the wide dataframe of adjusted close prices.
+    """
+    if columns is None:
+        columns = ["open", "high", "low", "close", "adj_close", "volume"]
+
+    select_cols = ", ".join(columns)
+    
+    where_clauses = [f"trade_date >= '{start_date}'"]
+    
+    if end_date:
+        where_clauses.append(f"trade_date <= '{end_date}'")
+
+    if security_ids:
+        sids_str = ", ".join(map(str, security_ids))
+        where_clauses.append(f"security_id IN ({sids_str})")
+    
+    where_sql = " AND ".join(where_clauses)
+
+    query = f"""
+        SELECT trade_date, security_id, {select_cols}
+        FROM prices
+        WHERE {where_sql}
+        ORDER BY trade_date, security_id
+    """
+    
+    df = con.execute(query).fetchdf()
+    
+    if df.empty:
+        return pd.DataFrame()
+        
+    # Ensure types
+    df["trade_date"] = pd.to_datetime(df["trade_date"])
+    df["security_id"] = df["security_id"].astype("int64")
+
+    # Pivot to MultiIndex wide format
+    # resulting columns: (Variable, SecurityID)
+    df_wide = df.pivot_table(
+        index="trade_date", 
+        columns="security_id", 
+        values=columns,
+        aggfunc="last"
+    )
+    
+    return df_wide
+
+
+def load_factor_values_wide(
+    con: duckdb.DuckDBPyConnection,
+    factor_name: str,
+    start_date: str = "2017-01-01",
+    end_date: str | None = None,
+    security_ids: List[int] | None = None,
+    value_col: str = "value",
+) -> pd.DataFrame:
+    """
+    Load factor values and pivot to wide format.
+    Index = trade_date, Columns = security_id
+    
+    Args:
+        value_col: The column to load (e.g. 'value', 'zscore_cross', 'rank_cross', 'zscore_cross_sector', 'rank_cross_sector')
+    """
+    # 1. Get factor_id
+    fid_row = con.execute(
+        "SELECT factor_id FROM factor_definitions WHERE name = ?", 
+        [factor_name]
+    ).fetchone()
+    
+    if not fid_row:
+        raise ValueError(f"Factor '{factor_name}' not found in factor_definitions.")
+    
+    factor_id = fid_row[0]
+
+    # 2. Build Query
+    where_clauses = [
+        f"factor_id = {factor_id}",
+        f"trade_date >= '{start_date}'"
+    ]
+    
+    if end_date:
+        where_clauses.append(f"trade_date <= '{end_date}'")
+
+    if security_ids:
+        sids_str = ", ".join(map(str, security_ids))
+        where_clauses.append(f"security_id IN ({sids_str})")
+
+    where_sql = " AND ".join(where_clauses)
+
+    # Validate value_col to prevent SQL injection
+    valid_cols = {"value", "zscore_cross", "rank_cross", "zscore_cross_sector", "rank_cross_sector"}
+    if value_col not in valid_cols:
+        raise ValueError(f"Invalid value_col: {value_col}. Must be one of {valid_cols}")
+
+    query = f"""
+        SELECT trade_date, security_id, {value_col}
+        FROM factor_values
+        WHERE {where_sql}
+        ORDER BY trade_date, security_id
+    """
+
+    df = con.execute(query).fetchdf()
+
+    if df.empty:
+        return pd.DataFrame()
+
+    # 3. Pivot
+    df_wide = df.pivot(index="trade_date", columns="security_id", values=value_col)
+    df_wide.index = pd.to_datetime(df_wide.index)
+
+    return df_wide
