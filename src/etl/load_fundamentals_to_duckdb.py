@@ -7,7 +7,6 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 import math
-import os
 
 # ===============================
 # Path Configuration
@@ -55,7 +54,24 @@ df_final = df[[
     "period_type",
     "metric",
     "value",
-]]
+]].copy()
+
+# ==========================================
+# Remove quarterly Q4 when annual exists
+# ==========================================
+df_final["period_type"] = df_final["period_type"].str.lower()
+
+# sort so that annual comes last (will be kept by drop_duplicates)
+df_final = df_final.sort_values(
+    by=["period_type"], 
+    key=lambda s: s == "annual"
+)
+
+# drop duplicates: keep annual if conflict
+df_final = df_final.drop_duplicates(
+    subset=["security_id", "period_end", "metric"],
+    keep="last"
+)
 
 # ================================
 # Insert Data into DuckDB
@@ -92,7 +108,7 @@ for i in tqdm(range(n_chunks), desc="Insert Progress", unit="chunk"):
     con.register("chunk_df", chunk)
 
     con.execute("""
-                INSERT INTO fundamentals
+                INSERT OR REPLACE INTO fundamentals
                 SELECT security_id, period_end, period_type, metric, value
                 FROM chunk_df;
                 """)

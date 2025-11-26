@@ -12,6 +12,7 @@ from typing import List
 import time
 from tqdm import tqdm
 import argparse
+import duckdb
 
 logging.basicConfig(
     level=logging.INFO,
@@ -169,24 +170,37 @@ class SP500PriceFetcherBatch:
 # ================================
 # Detect latest date for incremental update
 # ================================
-def detect_latest_date(raw_dir: Path) -> str:
-    """Return the max trade_date in all existing parquet files."""
-    parquet_files = sorted(raw_dir.glob("**/*.parquet"))
-    if not parquet_files:
-        logger.info("No existing parquet files found; full refresh mode.")
+def detect_latest_from_db(db_path: str, table_name="prices") -> str:
+    #1 check db exists
+    if not Path(db_path).exists():
+        logger.warning(f"DuckDB not found: {db_path}. Falling back to full refresh.")
         return "2017-01-01"
-    dfs = []
-    for f in parquet_files[-3:]:  # only check the last 3 files for efficiency
-        try:
-            df = pd.read_parquet(f, columns=["trade_date"])
-            dfs.append(df)
-        except Exception:
-            pass
-    if not dfs:
+
+    con = duckdb.connect(db_path)
+    
+    #2 check table exists
+    try:
+        tables = con.execute("SHOW TABLES").fetchdf()
+    except Exception as e:
+        logger.warning(f"DuckDB exists but cannot query tables: {e}. Full refresh.")
         return "2017-01-01"
-    last_date = max(pd.concat(dfs)["trade_date"])
-    next_day = (pd.to_datetime(last_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    logger.info(f"Detected latest date: {last_date}, next fetch starts from {next_day}")
+
+    if table_name.lower() not in tables.name.str.lower().tolist():
+        logger.warning(f"Table '{table_name}' not found in DuckDB. Full refresh.")
+        return "2017-01-01"
+
+    #3 check max trade_date
+    result = con.execute(f"SELECT max(trade_date) FROM {table_name}").fetchone()
+    con.close()
+
+    if result[0] is None:
+        logger.warning(f"Table '{table_name}' empty. Full refresh.")
+        return "2017-01-01"
+
+    last_date = pd.to_datetime(result[0])
+    next_day = (last_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
+    logger.info(f"DuckDB max date = {last_date}, incremental starts from: {next_day}")
     return next_day
 
 def main():
@@ -195,9 +209,27 @@ def main():
     args = parser.parse_args()
 
     fetcher = SP500PriceFetcherBatch(data_dir=str(DATA_DIR))
+    DATABASE_PATH = str(DATA_DIR / "warehouse" / "data.duckdb")
+    TEMP_DATA_DIR = fetcher.tmp_dir
+    
+    # if incremental, detect latest date from db
     if args.incremental:
-        fetcher.start_date = detect_latest_date(fetcher.raw_dir)
-        fetcher.end_date = None
+        max_date = detect_latest_from_db(DATABASE_PATH)
+        max_date = pd.to_datetime(max_date).date()
+        today = datetime.now().date()
+
+        if max_date >= today:
+            logger.info("Database is up to date. No need to update.")
+            return
+
+        fetcher.start_date = max_date
+        fetcher.end_date = today
+
+        # need to clean tmp files
+        import shutil
+        if Path(TEMP_DATA_DIR).exists():
+            shutil.rmtree(TEMP_DATA_DIR, ignore_errors=True)
+        Path(TEMP_DATA_DIR).mkdir(parents=True, exist_ok=True)
 
     sp500_df = fetcher.load_sp500_symbols(str(RAW_SP500))
     symbols = sp500_df["Symbol"].tolist()

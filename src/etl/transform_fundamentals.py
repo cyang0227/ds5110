@@ -59,48 +59,19 @@ dfA['year'] = pd.to_datetime(dfA['date'], errors='coerce').dt.year
 dfQ['year'] = pd.to_datetime(dfQ['date'], errors='coerce').dt.year
 
 
-# ### 5. Filter Data >= 2017
+# ### 5. Filter Data >= 2000
 
 # In[7]:
 
 
-dfA = dfA[dfA['year'] >= 2017]
-dfQ = dfQ[dfQ['year'] >= 2017]
+dfA = dfA[dfA['year'] >= 2000]
+dfQ = dfQ[dfQ['year'] >= 2000]
 
-# ### 6. Clean Quarterly: Pick Latest Quarter per Symbol-Year
-
+# ### 6. Combine Annual and Quarterly Data
 # In[8]:
+dfC = pd.concat([dfA, dfQ], ignore_index=True)
 
-
-dfQ_latest = (
-    dfQ.sort_values(['symbol', 'year', 'date'])
-       .groupby(['symbol', 'year'], as_index=False)
-       .last()
-)
-
-# ### 7. Clean Annual: Pick Final Annual Filing per Symbol-Year
-
-# In[9]:
-
-
-dfA_latest = (
-    dfA.sort_values(['symbol', 'year', 'date'])
-       .groupby(['symbol', 'year'], as_index=False)
-       .last()
-)
-
-# ### 8. Merge annual and quarter data (Annual priority)
-
-# In[10]:
-
-
-dfC = pd.concat([dfA_latest, dfQ_latest], ignore_index=True)
-
-df_clean = (
-    dfC.sort_values(['symbol', 'year', 'period'])  # A before Q
-       .groupby(['symbol', 'year'], as_index=False)
-       .first()
-)
+df_clean = dfC.sort_values(["symbol", "date"]).reset_index(drop=True)
 
 # ### 9. Transform wide format to long format
 

@@ -1,0 +1,46 @@
+name: ds5110
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.13
+
+  # ---- Core Data Libraries ----
+  - pandas=2.3.3
+  - numpy=2.3.4
+  - pyarrow=22.0.0
+
+  # ---- Database / ETL ----
+  - duckdb=1.4.1
+
+  # ---- ML / Stats ----
+  - scikit-learn=1.7.2
+  - scipy=1.16.2
+
+  # ---- Viz / Frontend ----
+  - matplotlib=3.10.7
+  - plotly=6.3.1
+  - altair=5.5.0
+  - imageio=2.37.0
+
+  # ---- Utils ----
+  - pip
+  - python-dotenv=1.2.1
+  - dateparser=1.2.2
+  - frozendict=2.4.6
+  - peewee=3.18.2
+  - tqdm=4.67.1
+  - requests
+
+  # ---- Optional: Jupyter ----
+  - jupyterlab
+  - ipykernel
+  - notebook
+  - ipywidgets=8.1.7
+
+  # ---- Install via pip (Not available in conda) ----
+  - pip:
+      - vectorbt==0.28.1
+      - yfinance==0.2.66
+      - streamlit==1.50.0

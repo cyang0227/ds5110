@@ -9,7 +9,16 @@ Smoke tests for momentum.py
 import duckdb
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
+from utils.path_helpers import add_project_root
+
+add_project_root(__file__, 2)
 
 from momentum import compute_momentum
 
