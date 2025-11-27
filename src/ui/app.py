@@ -36,7 +36,7 @@ page = st.sidebar.radio("Navigation", [
     "Stock Analysis",
     "Technical Backtest",
     "Factor Backtest",
-    "ETL Control"
+    "Data Management"
 ])
 
 # Helpers
@@ -292,6 +292,11 @@ elif page == "Factor Backtest":
         rebalance = col4.selectbox("Rebalance Freq", ["M", "W", "Q"], index=0)
         weighting = col5.selectbox("Weighting", ["equal", "factor"])
         
+        # Normalization Mode
+        col_n1, col_n2 = st.columns(2)
+        norm_mode = col_n1.radio("Normalization Mode", ["Market-Wide", "Sector-Neutral"], horizontal=True)
+        score_type = col_n2.radio("Score Type", ["Z-Score", "Rank"], horizontal=True)
+        
         # Date Range
         col6, col7 = st.columns(2)
         start_date = col6.date_input("Start Date", pd.to_datetime("2017-01-01"), key="factor_start")
@@ -302,36 +307,40 @@ elif page == "Factor Backtest":
                 con = get_db_connection()
                 
                 # 1. Load Factor Data
-                # 1. Load Factor Data
                 try:
                     if not selected_factors:
                         st.error("Please select at least one factor.")
                     else:
                         combined_factor_vals = None
                         
+                        # Determine which column to load
+                        if score_type == "Z-Score":
+                            if norm_mode == "Market-Wide":
+                                target_col = "zscore_cross"
+                            else:
+                                target_col = "zscore_cross_sector"
+                        else: # Rank
+                            if norm_mode == "Market-Wide":
+                                target_col = "rank_cross"
+                            else:
+                                target_col = "rank_cross_sector"
+
                         # Load and combine factors
                         for factor_name in selected_factors:
-                            df_factor = load_factor_values_wide(con, factor_name, value_col="value")
+                            # Load specific Z-score column from DB
+                            df_zscore = load_factor_values_wide(con, factor_name, value_col=target_col)
                             
-                            if df_factor.empty:
-                                st.warning(f"No data for factor: {factor_name}")
+                            if df_zscore.empty:
+                                st.warning(f"No data for factor: {factor_name} (Column: {target_col})")
                                 continue
                                 
                             # Filter by date immediately to reduce size
-                            mask_dates = (df_factor.index.date >= start_date) & (df_factor.index.date <= end_date)
-                            df_factor = df_factor.loc[mask_dates]
+                            mask_dates = (df_zscore.index.date >= start_date) & (df_zscore.index.date <= end_date)
+                            df_zscore = df_zscore.loc[mask_dates]
                             
-                            if df_factor.empty:
+                            if df_zscore.empty:
                                 st.warning(f"No data for factor {factor_name} in selected date range.")
                                 continue
-
-                            # Z-Score Normalization (Cross-sectional)
-                            # (Value - Mean) / Std
-                            mean = df_factor.mean(axis=1)
-                            std = df_factor.std(axis=1)
-                            # Avoid division by zero
-                            std = std.replace(0, 1) 
-                            df_zscore = df_factor.sub(mean, axis=0).div(std, axis=0)
                             
                             # Apply Weight
                             weight = factor_weights.get(factor_name, 1.0)
@@ -561,10 +570,12 @@ elif page == "Factor Backtest":
 
 
 # ==========================================
-# Page: ETL Control
+# Page: Data Management
 # ==========================================
-elif page == "ETL Control":
-    st.title("🔄 ETL Control Center")
+elif page == "Data Management":
+    st.title("🗄️ Data Management")
+    
+    st.header("1. ETL Pipeline (Data Ingestion)")
     
     st.write("Trigger data updates manually.")
     
@@ -583,7 +594,7 @@ elif page == "ETL Control":
         except Exception as e:
             st.warning(f"Could not close connection: {e}")
 
-        cmd = ["python", str(project_root / "src/etl/run_etl.py")]
+        cmd = ["python", "-u", str(project_root / "src/etl/run_etl.py")]
         if only_prices:
             cmd.append("--only-prices")
         if only_fundamentals:
@@ -617,6 +628,54 @@ elif page == "ETL Control":
                 st.success("ETL Pipeline Completed Successfully!")
             else:
                 st.error("ETL Pipeline Failed.")
+                
+        except Exception as e:
+            st.error(f"Failed to run process: {e}")
+
+    st.markdown("---")
+    st.header("2. Factor Pipeline (Calculation)")
+    st.write("Calculate and store factors (etc. Momentum, Value) into the database.")
+    
+    if st.button("🚀 Run Factor Pipeline"):
+        # Close DB connection to release lock
+        try:
+            con = get_db_connection()
+            con.close()
+            st.cache_resource.clear()
+            st.warning("Database connection closed. App will reconnect on next action.")
+        except Exception as e:
+            st.warning(f"Could not close connection: {e}")
+            
+        # Use -u for unbuffered output to see logs in real-time
+        cmd = ["python", "-u", str(project_root / "src/pipelines/run_factor_pipeline.py")]
+        st.info(f"Running command: {' '.join(cmd)}")
+        
+        # Run subprocess and stream output
+        try:
+            process = subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True,
+                cwd=str(project_root)
+            )
+            
+            log_area = st.empty()
+            logs = []
+            
+            for line in process.stdout:
+                logs.append(line)
+                # Update log area every few lines or just append
+                log_area.code("".join(logs[-20:])) # Show last 20 lines
+                
+            process.wait()
+            
+            if process.returncode == 0:
+                st.success("Factor Pipeline Completed Successfully!")
+                # Clear cache to reload factors
+                st.cache_data.clear()
+            else:
+                st.error("Factor Pipeline Failed.")
                 
         except Exception as e:
             st.error(f"Failed to run process: {e}")
