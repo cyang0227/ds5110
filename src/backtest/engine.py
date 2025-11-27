@@ -85,7 +85,7 @@ class FactorBacktester:
             weights = entries.astype(float).div(entries.sum(axis=1), axis=0)
         elif weighting == 'factor':
             # Weight proportional to factor value (absolute value)
-            # We use the factor values for the selected entries
+            # Use the factor values for the selected entries
             selected_factors = self.factor_values.where(entries).abs()
             weights = selected_factors.div(selected_factors.sum(axis=1), axis=0)
         else:
@@ -129,7 +129,8 @@ class FactorBacktester:
         weighting: str = 'equal',
         fees: float = 0.001,
         slippage: float = 0.001,
-        input_is_rank: bool = False
+        input_is_rank: bool = False,
+        benchmark_prices: pd.Series = None
     ) -> vbt.Portfolio:
         """
         Run a Top-N Long-Only strategy.
@@ -141,6 +142,7 @@ class FactorBacktester:
             fees: Transaction fees (e.g. 0.001 = 10bps).
             slippage: Slippage (e.g. 0.001 = 10bps).
             input_is_rank: If True, treats factor_values as ranks (1=Best).
+            benchmark_prices: Optional Series of benchmark prices (e.g. SPY).
         """
         # 1. Generate Ranks
         if input_is_rank:
@@ -148,7 +150,7 @@ class FactorBacktester:
             ranks = self.factor_values
         else:
             # Higher factor value = Higher rank (1 is best in our logic for selection)
-            # But standard rank(ascending=False) gives 1 to largest value.
+            # Standard rank(ascending=False) gives 1 to largest value.
             ranks = self.factor_values.rank(axis=1, ascending=False)
         
         # 2. Generate Target Weights
@@ -167,144 +169,13 @@ class FactorBacktester:
             fees=fees,
             slippage=slippage,
             group_by=True,
-            cash_sharing=True
+            cash_sharing=True,
+            init_cash=100000
         )
+        
+        if benchmark_prices is not None:
+            pf._benchmark_close = benchmark_prices
         
         return pf
 
-    def run_long_short_strategy(
-        self, 
-        top_n: int = 20, 
-        rebalance_freq: str = 'M',
-        weighting: str = 'equal',
-        fees: float = 0.001,
-        slippage: float = 0.001,
-        input_is_rank: bool = False
-    ) -> vbt.Portfolio:
-        """
-        Run a Long-Short strategy (Long Top-N, Short Bottom-N).
-        
-        Args:
-            top_n: Number of stocks to hold on each side.
-            rebalance_freq: Rebalancing frequency.
-            weighting: 'equal' or 'factor'.
-            fees: Transaction fees.
-            slippage: Slippage.
-            input_is_rank: If True, treats factor_values as ranks (1=Best).
-        """
-        # 1. Generate Ranks
-        if input_is_rank:
-            # Assume factor_values are ranks (1=Best/Long side)
-            # For Short side (Worst), we need the largest rank values.
-            # This is tricky if we don't know N.
-            # However, if input is rank, we can assume:
-            # Long: rank <= top_n
-            # Short: rank > (count - top_n) ? Or just use the largest ranks.
-            # Actually, if we have pre-computed ranks, we usually only have one "rank" column.
-            # If the user wants Long-Short on ranks, they should probably provide raw values.
-            # BUT, if they provide `rank_cross`, 1 is best.
-            # We need to know the "bottom" ranks.
-            # Let's calculate count per day.
-            counts = self.factor_values.count(axis=1)
-            # Align counts to dataframe shape
-            counts_df = self.factor_values.apply(lambda x: counts, axis=0)
-            
-            ranks_desc = self.factor_values # 1 is Best
-            # For shorting, we want the "worst" ranks, which are close to 'count'
-            # i.e. rank >= count - top_n + 1
-            
-            long_entries = ranks_desc <= top_n
-            short_entries = ranks_desc > (counts_df - top_n)
-            
-        else:
-            # Ascending=False -> Rank 1 is largest factor value (Long side)
-            ranks_desc = self.factor_values.rank(axis=1, ascending=False)
-            # Ascending=True -> Rank 1 is smallest factor value (Short side)
-            ranks_asc = self.factor_values.rank(axis=1, ascending=True)
-            
-            long_entries = ranks_desc <= top_n
-            short_entries = ranks_asc <= top_n
-        
-        # 2. Calculate Weights
-        # For Long-Short, we usually want 100% Long and 100% Short (Gross 200%)
-        # Or 50% Long and 50% Short (Gross 100%). Let's assume Gross 100% (Neutral).
-        long_weights = self._calculate_weights(long_entries, weighting=weighting) * 0.5
-        short_weights = self._calculate_weights(short_entries, weighting=weighting) * -0.5
-        
-        weights = long_weights.add(short_weights, fill_value=0.0)
-        
-        # 3. Resample Weights
-        weights = self._prepare_simulation_input(weights, rebalance_freq)
-        
-        # 4. Run Simulation
-        pf = vbt.Portfolio.from_orders(
-            close=self.close_prices,
-            size=weights,
-            size_type='targetpercent',
-            freq='1D',
-            fees=fees,
-            slippage=slippage,
-            group_by=True,
-            cash_sharing=True
-        )
-        
-        return pf
 
-    def run_threshold_strategy(
-        self,
-        lower_threshold: float = -2.0,
-        upper_threshold: float = 2.0,
-        rebalance_freq: str = 'M',
-        fees: float = 0.001,
-        slippage: float = 0.001
-    ) -> vbt.Portfolio:
-        """
-        Run a Threshold strategy based on absolute factor values (e.g. Z-Scores).
-        Long if value > upper_threshold
-        Short if value < lower_threshold
-        
-        Args:
-            lower_threshold: Short signal threshold.
-            upper_threshold: Long signal threshold.
-        """
-        # 1. Generate Signals
-        long_entries = self.factor_values > upper_threshold
-        short_entries = self.factor_values < lower_threshold
-        
-        # 2. Calculate Weights (Equal weight among signals)
-        # Note: This strategy might have varying leverage if many/few stocks hit threshold.
-        # We will normalize to 100% Gross Exposure (50% Long, 50% Short) if both exist,
-        # or 100% Long / 100% Short if only one side exists?
-        # Standard approach:
-        # Sum of Long Weights = 0.5 (if any longs)
-        # Sum of Short Weights = -0.5 (if any shorts)
-        
-        # Helper to safe divide
-        def get_weights(entries, target_total):
-            count = entries.sum(axis=1)
-            # Avoid division by zero
-            w = entries.astype(float).div(count.replace(0, 1), axis=0) * target_total
-            # If count was 0, w is 0.
-            return w
-
-        long_weights = get_weights(long_entries, 0.5)
-        short_weights = get_weights(short_entries, -0.5)
-        
-        weights = long_weights.add(short_weights, fill_value=0.0)
-        
-        # 3. Resample Weights
-        weights = self._prepare_simulation_input(weights, rebalance_freq)
-        
-        # 4. Run Simulation
-        pf = vbt.Portfolio.from_orders(
-            close=self.close_prices,
-            size=weights,
-            size_type='targetpercent',
-            freq='1D',
-            fees=fees,
-            slippage=slippage,
-            group_by=True,
-            cash_sharing=True
-        )
-        
-        return pf

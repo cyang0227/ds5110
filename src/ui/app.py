@@ -1,12 +1,622 @@
 import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+import duckdb
+import sys
+import os
+import subprocess
+import vectorbt as vbt
+from pathlib import Path
 
+# Add project root to path to allow imports
+current_dir = Path(__file__).resolve().parent
+project_root = current_dir.parent.parent
+sys.path.append(str(project_root / "src"))
+
+from utils.factor_data import get_all_tickers, get_all_factors, load_ohlcv_wide, load_factor_values_wide
+from backtest.engine import FactorBacktester
+
+# Database Connection
+DB_PATH = str(project_root / "data" / "warehouse" / "data.duckdb")
+
+@st.cache_resource
+def get_db_connection():
+    return duckdb.connect(DB_PATH, read_only=True)
+
+# Page Config
 st.set_page_config(
-    page_title="Factor-Based Stock Tool",
-    layout="wide"
+    page_title="DS5110 Factor Tool",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
+# Sidebar
 st.sidebar.title("📊 DS5110 – Factor Tool")
-st.sidebar.write("Select a page from the left")
+page = st.sidebar.radio("Navigation", [
+    "Stock Analysis",
+    "Technical Backtest",
+    "Factor Backtest",
+    "ETL Control"
+])
 
-st.title("Factor-Based Stock Recommendation Tool")
-st.write("Use the sidebar to explore factors or run a backtest.")
+# Helpers
+@st.cache_data
+def load_tickers():
+    con = get_db_connection()
+    return get_all_tickers(con)
+
+@st.cache_data
+def load_factors():
+    con = get_db_connection()
+    return get_all_factors(con)
+
+# ==========================================
+# Page: Stock Analysis
+# ==========================================
+if page == "Stock Analysis":
+    st.title("📈 Stock Analysis")
+    
+    tickers_df = load_tickers()
+    if tickers_df.empty:
+        st.error("No tickers found in database. Please run ETL first.")
+    else:
+        # Ticker Selector
+        ticker_options = tickers_df.apply(lambda x: f"{x['symbol']} - {x['name']}", axis=1).tolist()
+        selected_ticker_str = st.selectbox("Select Stock", ticker_options)
+        selected_symbol = selected_ticker_str.split(" - ")[0]
+        selected_sid = tickers_df[tickers_df['symbol'] == selected_symbol]['security_id'].iloc[0]
+        
+        # Load Data
+        con = get_db_connection()
+        try:
+            # Load OHLCV for this specific ticker
+            # We use load_ohlcv_wide but restrict to one security_id
+            df_wide = load_ohlcv_wide(con, security_ids=[selected_sid])
+            
+            if df_wide.empty:
+                st.warning(f"No price data found for {selected_symbol}")
+            else:
+                # df_wide columns are MultiIndex (Variable, SecurityID)
+                # We need to flatten it for a single stock
+                df_stock = df_wide.xs(selected_sid, axis=1, level=1)
+                
+                # Date Range Filter
+                min_date = df_stock.index.min().date()
+                max_date = df_stock.index.max().date()
+                
+                col1, col2 = st.columns(2)
+                start_date = col1.date_input("Start Date", min_date)
+                end_date = col2.date_input("End Date", max_date)
+                
+                mask = (df_stock.index.date >= start_date) & (df_stock.index.date <= end_date)
+                df_plot = df_stock.loc[mask]
+                
+                # Plot
+                fig = go.Figure()
+                
+                # Candlestick
+                fig.add_trace(go.Candlestick(
+                    x=df_plot.index,
+                    open=df_plot['open'],
+                    high=df_plot['high'],
+                    low=df_plot['low'],
+                    close=df_plot['close'],
+                    name='OHLC'
+                ))
+                
+                # Moving Averages
+                if st.checkbox("Show SMA 50"):
+                    sma50 = df_plot['close'].rolling(window=50).mean()
+                    fig.add_trace(go.Scatter(x=df_plot.index, y=sma50, mode='lines', name='SMA 50'))
+                    
+                if st.checkbox("Show SMA 200"):
+                    sma200 = df_plot['close'].rolling(window=200).mean()
+                    fig.add_trace(go.Scatter(x=df_plot.index, y=sma200, mode='lines', name='SMA 200'))
+
+                fig.update_layout(title=f"{selected_symbol} Price Chart", xaxis_title="Date", yaxis_title="Price")
+                st.plotly_chart(fig, width='stretch')
+                
+                # Volume
+                fig_vol = go.Figure()
+                fig_vol.add_trace(go.Bar(x=df_plot.index, y=df_plot['volume'], name='Volume'))
+                fig_vol.update_layout(title="Volume", xaxis_title="Date", yaxis_title="Volume", height=300)
+                st.plotly_chart(fig_vol, width='stretch')
+                
+        except Exception as e:
+            st.error(f"Error loading data: {e}")
+
+# ==========================================
+# Page: Technical Backtest
+# ==========================================
+elif page == "Technical Backtest":
+    st.title("🛠️ Technical Backtest (Single Stock)")
+    
+    tickers_df = load_tickers()
+    if tickers_df.empty:
+        st.error("No tickers found.")
+    else:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            ticker_options = tickers_df['symbol'].tolist()
+            symbol = st.selectbox("Select Stock", ticker_options)
+            
+        with col2:
+            strategy = st.selectbox("Strategy", ["SMA Crossover", "RSI", "MACD"])
+            
+        # Strategy Params
+        params = {}
+        if strategy == "SMA Crossover":
+            fast = st.number_input("Fast Window", 10, 100, 20)
+            slow = st.number_input("Slow Window", 20, 200, 50)
+            params = {'fast': fast, 'slow': slow}
+        elif strategy == "RSI":
+            window = st.number_input("RSI Window", 5, 50, 14)
+            lower = st.number_input("Lower Threshold", 10, 40, 30)
+            upper = st.number_input("Upper Threshold", 60, 90, 70)
+            params = {'window': window, 'lower': lower, 'upper': upper}
+            
+        # Date Range
+        col3, col4 = st.columns(2)
+        start_date = col3.date_input("Start Date", pd.to_datetime("2017-01-01"))
+        end_date = col4.date_input("End Date", pd.to_datetime("today"))
+        
+        if st.button("Run Backtest"):
+            sid = tickers_df[tickers_df['symbol'] == symbol]['security_id'].iloc[0]
+            con = get_db_connection()
+            df_wide = load_ohlcv_wide(con, security_ids=[sid])
+            
+            if df_wide.empty:
+                st.error("No data found.")
+            else:
+                close_price = df_wide.xs(sid, axis=1, level=1)['close']
+                
+                # Filter by date
+                mask = (close_price.index.date >= start_date) & (close_price.index.date <= end_date)
+                close_price = close_price.loc[mask]
+                
+                if close_price.empty:
+                    st.error("No data for selected date range.")
+                else:
+                    pf = None
+                    if strategy == "SMA Crossover":
+                        fast_ma = vbt.MA.run(close_price, params['fast'])
+                        slow_ma = vbt.MA.run(close_price, params['slow'])
+                        entries = fast_ma.ma_crossed_above(slow_ma)
+                        exits = fast_ma.ma_crossed_below(slow_ma)
+                        pf = vbt.Portfolio.from_signals(close_price, entries, exits, freq='1D', init_cash=100000)
+                        
+                    elif strategy == "RSI":
+                        rsi = vbt.RSI.run(close_price, window=params['window'])
+                        entries = rsi.rsi_crossed_below(params['lower'])
+                        exits = rsi.rsi_crossed_above(params['upper'])
+                        pf = vbt.Portfolio.from_signals(close_price, entries, exits, freq='1D', init_cash=100000)
+                    
+                    elif strategy == "MACD":
+                         macd = vbt.MACD.run(close_price)
+                         entries = macd.macd_crossed_above(macd.signal)
+                         exits = macd.macd_crossed_below(macd.signal)
+                         pf = vbt.Portfolio.from_signals(close_price, entries, exits, freq='1D', init_cash=100000)
+                    
+                    if pf:
+                        st.session_state['tech_pf'] = pf
+                        st.session_state['tech_symbol'] = symbol
+                        st.session_state['tech_strategy'] = strategy
+
+        if 'tech_pf' in st.session_state:
+            pf = st.session_state['tech_pf']
+            symbol = st.session_state['tech_symbol']
+            strategy = st.session_state['tech_strategy']
+            
+            st.subheader("Results")
+            st.metric("Total Return", f"{pf.total_return():.2%}")
+            st.metric("Sharpe Ratio", f"{pf.sharpe_ratio():.2f}")
+            st.metric("Max Drawdown", f"{pf.max_drawdown():.2%}")
+            
+            st.plotly_chart(pf.plot(), width='stretch')
+            # Downloads
+            st.subheader("Downloads")
+            col_d1, col_d2 = st.columns(2)
+            
+            # Orders
+            orders_df = pf.orders.records_readable
+            if 'Column' in orders_df.columns:
+                orders_df = orders_df.rename(columns={'Column': 'Ticker'})
+            # Ensure Ticker column has the symbol name (for single stock it might be generic)
+            if 'Ticker' in orders_df.columns:
+                orders_df['Ticker'] = symbol
+            
+            csv_orders = orders_df.to_csv().encode('utf-8')
+            col_d1.download_button(
+                label="Download Orders (CSV)",
+                data=csv_orders,
+                file_name=f"{symbol}_{strategy}_orders.csv",
+                mime="text/csv",
+            )
+            
+            # Trades (Positions)
+            trades_df = pf.trades.records_readable
+            if 'Column' in trades_df.columns:
+                trades_df = trades_df.rename(columns={'Column': 'Ticker'})
+            if 'Ticker' in trades_df.columns:
+                trades_df['Ticker'] = symbol
+                
+            csv_trades = trades_df.to_csv().encode('utf-8')
+            col_d2.download_button(
+                label="Download Trade Log (CSV)",
+                data=csv_trades,
+                file_name=f"{symbol}_{strategy}_trades.csv",
+                mime="text/csv",
+            )
+
+# ==========================================
+# Page: Factor Backtest
+# ==========================================
+elif page == "Factor Backtest":
+    st.title("🧪 Factor Backtest (Portfolio)")
+    
+    factors_df = load_factors()
+    if factors_df.empty:
+        st.error("No factors found.")
+    else:
+        # Inputs
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_factors = st.multiselect("Select Factors", factors_df['name'].tolist(), default=[factors_df['name'].iloc[0]])
+        with col2:
+            st.write("Strategy: Top N Long-Only")
+            # strategy_type = st.selectbox("Strategy Type", ["Top N Long-Only", "Long-Short"])
+            
+        # Factor Weights
+        factor_weights = {}
+        if len(selected_factors) > 1:
+            st.write("Factor Weights")
+            cols = st.columns(len(selected_factors))
+            total_weight = 0.0
+            for i, factor in enumerate(selected_factors):
+                weight = cols[i].number_input(f"Weight: {factor}", value=1.0 / len(selected_factors), step=0.1)
+                factor_weights[factor] = weight
+                total_weight += weight
+            
+            # Validation
+            if abs(total_weight - 1.0) > 0.01:
+                st.warning(f"⚠️ Total Weight is {total_weight:.2f}. It will be normalized to 1.0 automatically.")
+                # Normalize weights for calculation
+                for f in factor_weights:
+                    factor_weights[f] = factor_weights[f] / total_weight
+        elif len(selected_factors) == 1:
+            factor_weights[selected_factors[0]] = 1.0
+            
+        col3, col4, col5 = st.columns(3)
+        top_n = col3.number_input("Top N Stocks", 5, 100, 20)
+        rebalance = col4.selectbox("Rebalance Freq", ["M", "W", "Q"], index=0)
+        weighting = col5.selectbox("Weighting", ["equal", "factor"])
+        
+        # Date Range
+        col6, col7 = st.columns(2)
+        start_date = col6.date_input("Start Date", pd.to_datetime("2017-01-01"), key="factor_start")
+        end_date = col7.date_input("End Date", pd.to_datetime("today"), key="factor_end")
+        
+        if st.button("Run Factor Backtest"):
+            with st.spinner("Loading data and running backtest..."):
+                con = get_db_connection()
+                
+                # 1. Load Factor Data
+                # 1. Load Factor Data
+                try:
+                    if not selected_factors:
+                        st.error("Please select at least one factor.")
+                    else:
+                        combined_factor_vals = None
+                        
+                        # Load and combine factors
+                        for factor_name in selected_factors:
+                            df_factor = load_factor_values_wide(con, factor_name, value_col="value")
+                            
+                            if df_factor.empty:
+                                st.warning(f"No data for factor: {factor_name}")
+                                continue
+                                
+                            # Filter by date immediately to reduce size
+                            mask_dates = (df_factor.index.date >= start_date) & (df_factor.index.date <= end_date)
+                            df_factor = df_factor.loc[mask_dates]
+                            
+                            if df_factor.empty:
+                                st.warning(f"No data for factor {factor_name} in selected date range.")
+                                continue
+
+                            # Z-Score Normalization (Cross-sectional)
+                            # (Value - Mean) / Std
+                            mean = df_factor.mean(axis=1)
+                            std = df_factor.std(axis=1)
+                            # Avoid division by zero
+                            std = std.replace(0, 1) 
+                            df_zscore = df_factor.sub(mean, axis=0).div(std, axis=0)
+                            
+                            # Apply Weight
+                            weight = factor_weights.get(factor_name, 1.0)
+                            df_weighted = df_zscore * weight
+                            
+                            if combined_factor_vals is None:
+                                combined_factor_vals = df_weighted
+                            else:
+                                # Align and add (fill_value=0 might be risky if coverage differs, but standard for combination)
+                                combined_factor_vals = combined_factor_vals.add(df_weighted, fill_value=0)
+                        
+                        if combined_factor_vals is None or combined_factor_vals.empty:
+                            st.error("Could not combine factors (no data found).")
+                        else:
+                            factor_vals = combined_factor_vals
+                            
+                            # 2. Load Price Data (All stocks that have factor data)
+                            # We can just load all prices for simplicity or intersect
+                            # For now, load all prices (might be heavy, but safe)
+                            # Optimization: Get SIDs from factor_vals columns
+                            sids = factor_vals.columns.tolist()
+                            prices_wide = load_ohlcv_wide(con, security_ids=sids)
+                            
+                            if prices_wide.empty:
+                                st.error("No price data found matching factor securities.")
+                            else:
+                                # Extract close prices
+                                # prices_wide is (Variable, SecurityID)
+                                # We want (Date, SecurityID)
+                                close_prices = prices_wide.xs('adj_close', axis=1, level=0)
+                                
+                                # Filter by date
+                                # Align factor_vals and close_prices to the selected date range
+                                # Note: factor_vals index is datetime, start_date is date.
+                                # Already filtered factor_vals above, but ensure alignment
+                                
+                                # Also filter prices to match (engine does intersection, but good to reduce size early)
+                                close_prices = close_prices.loc[close_prices.index.date >= start_date]
+                                close_prices = close_prices.loc[close_prices.index.date <= end_date]
+                                
+                                # Reindex factor_vals to match close_prices index (intersection)
+                                common_index = close_prices.index.intersection(factor_vals.index)
+                                close_prices = close_prices.loc[common_index]
+                                factor_vals = factor_vals.loc[common_index]
+                                
+                                if factor_vals.empty:
+                                    st.error("No factor data for selected date range after alignment.")
+                                else:
+                                    # Load Benchmark (SPY = 504)
+                                    spy_df = load_ohlcv_wide(con, security_ids=[504])
+                                    benchmark_series = None
+                                    if not spy_df.empty:
+                                        # spy_df is (Variable, SecurityID) -> flatten to Series
+                                        benchmark_series = spy_df.xs(504, axis=1, level=1)['adj_close']
+                                        # Align benchmark to close_prices index
+                                        benchmark_series = benchmark_series.reindex(close_prices.index).ffill()
+                                    
+                                    # 3. Initialize Engine
+                                    backtester = FactorBacktester(prices=close_prices, factor_values=factor_vals)
+                                    
+                                    # 4. Run Strategy
+                                    # Default to Top N Long-Only
+                                    pf = backtester.run_top_n_strategy(
+                                        top_n=top_n, 
+                                        rebalance_freq=rebalance, 
+                                        weighting=weighting,
+                                        benchmark_prices=benchmark_series
+                                    )
+                                        
+                                    st.session_state['factor_pf'] = pf
+                                
+                except Exception as e:
+                    st.error(f"Backtest failed: {e}")
+
+        if 'factor_pf' in st.session_state:
+            pf = st.session_state['factor_pf']
+            
+            st.success("Backtest Complete!")
+            
+            st.subheader("Performance Metrics")
+            stats = pf.stats()
+            # Fix for PyArrow serialization error with mixed types
+            st.dataframe(stats.astype(str))
+            
+            st.subheader("Equity Curve")
+            # Customize plot to avoid warnings about orders/trade_pnl on grouped data
+            fig = pf.plot(subplots=['value'])
+            
+            # Manually add benchmark if available
+            bm_attr = getattr(pf, '_benchmark_close', None)
+            if bm_attr is not None:
+                bm = bm_attr
+                # Rebase benchmark to match portfolio initial value
+                port_value = pf.value()
+                
+                if isinstance(port_value, pd.Series):
+                    initial_value = port_value.iloc[0]
+                    initial_bm = bm.iloc[0]
+                    
+                    if initial_bm > 0:
+                        bm_rebased = bm / initial_bm * initial_value
+                        fig.add_trace(go.Scatter(
+                            x=bm.index, 
+                            y=bm_rebased, 
+                            mode='lines', 
+                            name='Benchmark (SPY)',
+                            line=dict(color='gray', dash='dash'),
+                            opacity=0.7
+                        ))
+            
+            st.plotly_chart(fig, width='stretch')
+            
+            # =======================
+            # Downloads
+            # =======================
+            st.subheader("Downloads")
+            col_d1, col_d2 = st.columns(2)
+            
+            # Load tickers for mapping (security_id -> symbol)
+            tickers_df = load_tickers()
+            id_map = tickers_df.set_index('security_id')['symbol'].to_dict()
+            
+            # Orders
+            # For Factor Backtest, orders might be large, but useful
+            orders_df = pf.orders.records_readable
+            if 'Column' in orders_df.columns:
+                orders_df = orders_df.rename(columns={'Column': 'Ticker'})
+            
+            # Map security_id to symbol
+            if 'Ticker' in orders_df.columns:
+                orders_df['Ticker'] = orders_df['Ticker'].map(id_map)
+                
+            csv_orders = orders_df.to_csv().encode('utf-8')
+            col_d1.download_button(
+                label="Download Orders (CSV)",
+                data=csv_orders,
+                file_name=f"factor_backtest_orders.csv",
+                mime="text/csv",
+            )
+            
+            # Trades
+            trades_df = pf.trades.records_readable
+            if 'Column' in trades_df.columns:
+                trades_df = trades_df.rename(columns={'Column': 'Ticker'})
+                
+            # Map security_id to symbol
+            if 'Ticker' in trades_df.columns:
+                trades_df['Ticker'] = trades_df['Ticker'].map(id_map)
+                
+            csv_trades = trades_df.to_csv().encode('utf-8')
+            col_d2.download_button(
+                label="Download Trade Log (CSV)",
+                data=csv_trades,
+                file_name=f"factor_backtest_trades.csv",
+                mime="text/csv",
+            )
+            
+            # Positions (Rebalance Holdings)
+            # pf.assets() returns a DataFrame/Series of asset holdings (shares)
+            positions_df = pf.assets()
+            
+            # 1. Identify Rebalance Dates (Dates where trades occurred)
+             
+            # Debugging
+            # st.write(f"Debug: orders_df columns: {orders_df.columns.tolist()}")
+            
+            # Check for 'Date' or 'index' or whatever holds the timestamp
+            date_col = None
+            if 'Date' in orders_df.columns:
+                date_col = 'Date'
+            elif 'Timestamp' in orders_df.columns:
+                date_col = 'Timestamp'
+            elif 'index' in orders_df.columns:
+                date_col = 'index'
+            elif isinstance(orders_df.index, pd.DatetimeIndex):
+                # If date is in index and not reset
+                orders_df = orders_df.reset_index()
+                date_col = orders_df.columns[0] # Assume first col is date after reset
+            
+            if not orders_df.empty and date_col:
+                # Get unique dates from orders
+                # Ensure dates are datetime for comparison
+                trade_dates = pd.to_datetime(orders_df[date_col]).dt.normalize().unique()
+                
+                # st.write(f"Debug: Found {len(trade_dates)} unique trade dates.")
+                
+                # Filter positions to only these dates
+                # positions_df index is datetime
+                mask = positions_df.index.normalize().isin(trade_dates)
+                positions_df = positions_df.loc[mask]
+                
+                # st.write(f"Debug: Filtered positions to {len(positions_df)} rows.")
+            else:
+                st.warning(f"Debug: Could not filter by date. Columns: {orders_df.columns.tolist()}")
+            
+            # 2. Rename columns (SecurityID -> Ticker)
+            col_map = {sid: id_map.get(sid, str(sid)) for sid in positions_df.columns}
+            positions_df = positions_df.rename(columns=col_map)
+            
+            # 3. Melt to Long Format
+            # Ensure index is named 'Date' so reset_index creates a 'Date' column
+            positions_df.index.name = 'Date'
+            positions_df = positions_df.reset_index()
+            
+            # Melt
+            positions_long = positions_df.melt(
+                id_vars=['Date'], 
+                var_name='Ticker', 
+                value_name='Shares'
+            )
+            
+            # 4. Filter out zero positions
+            positions_long = positions_long[positions_long['Shares'] != 0]
+            
+            # Sort by Date and Ticker
+            positions_long = positions_long.sort_values(['Date', 'Ticker'])
+            
+            csv_positions = positions_long.to_csv(index=False).encode('utf-8')
+            
+            st.download_button(
+                label="Download Rebalance Positions",
+                data=csv_positions,
+                file_name=f"factor_backtest_positions.csv",
+                mime="text/csv",
+            )
+            
+
+
+# ==========================================
+# Page: ETL Control
+# ==========================================
+elif page == "ETL Control":
+    st.title("🔄 ETL Control Center")
+    
+    st.write("Trigger data updates manually.")
+    
+    col1, col2 = st.columns(2)
+    only_prices = col1.checkbox("Only Prices")
+    only_fundamentals = col2.checkbox("Only Fundamentals")
+    incremental = st.checkbox("Incremental Update (Faster)")
+    
+    if st.button("🚀 Run ETL Pipeline"):
+        # Close DB connection to release lock
+        try:
+            con = get_db_connection()
+            con.close()
+            st.cache_resource.clear()
+            st.warning("Database connection closed for ETL. App will reconnect on next action.")
+        except Exception as e:
+            st.warning(f"Could not close connection: {e}")
+
+        cmd = ["python", str(project_root / "src/etl/run_etl.py")]
+        if only_prices:
+            cmd.append("--only-prices")
+        if only_fundamentals:
+            cmd.append("--only-fundamentals")
+        if incremental:
+            cmd.append("--incremental")
+            
+        st.info(f"Running command: {' '.join(cmd)}")
+        
+        # Run subprocess and stream output
+        try:
+            process = subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True,
+                cwd=str(project_root / "src/etl")
+            )
+            
+            log_area = st.empty()
+            logs = []
+            
+            for line in process.stdout:
+                logs.append(line)
+                # Update log area every few lines or just append
+                log_area.code("".join(logs[-20:])) # Show last 20 lines
+                
+            process.wait()
+            
+            if process.returncode == 0:
+                st.success("ETL Pipeline Completed Successfully!")
+            else:
+                st.error("ETL Pipeline Failed.")
+                
+        except Exception as e:
+            st.error(f"Failed to run process: {e}")
