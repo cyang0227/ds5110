@@ -95,7 +95,7 @@ def run_example():
         results['Long-Short (Factor)'] = pf_ls_factor
 
         # 3.5 Sector-Neutral Top-N (using rank_cross_sector)
-        print("Running Sector-Neutral Top-N...")
+        print("Running Sector-Neutral Top-10%...")
         # Load rank_cross_sector
         df_rank_sector = load_factor_values_wide(
             con, 
@@ -106,12 +106,12 @@ def run_example():
         if not df_rank_sector.empty:
             bt_sector = FactorBacktester(prices=df_ohlcv, factor_values=df_rank_sector)
             pf_sector = bt_sector.run_top_n_strategy(
-                top_n=5, # Top 5 per sector (approx)
+                top_n=0.1, # Top 10% per sector
                 rebalance_freq='M',
                 weighting='equal',
                 input_is_rank=True
             )
-            results['Sector-Neutral Top-5'] = pf_sector
+            results['Sector-Neutral Top-10%'] = pf_sector
         else:
             print("Warning: rank_cross_sector is empty.")
 

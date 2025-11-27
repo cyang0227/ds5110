@@ -21,7 +21,9 @@ def postprocess_factor(
     *,
     enable_sector_neutral: bool = True,
     enable_winsorize: bool = True,
-    enable_log: bool = False
+    enable_log: bool = False,
+    enable_zscore: bool = True,
+    enable_rank: bool = True
 ) -> pd.DataFrame:
     """
     Unified cross-sectional factor post-processing pipeline.
