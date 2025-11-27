@@ -32,8 +32,7 @@ def run_example():
             print("Columns:", df_ohlcv.columns.get_level_values(0).unique())
 
         print("Loading Factor data (Composite Value)...")
-        # Ensure you have run test_value_to_database.py first to generate this factor!
-        # If "value_composite" doesn't exist, try "earnings_yield" or whatever you computed.
+        # Ensure test_value_to_database.py is run first to generate this factor!
         factor_name = "value_composite_all" 
         
         # Check if factor exists first
@@ -57,28 +56,126 @@ def run_example():
         print("Running Backtest...")
         backtester = FactorBacktester(prices=df_ohlcv, factor_values=df_factor)
         
-        pf = backtester.run_top_n_strategy(
+        results = {}
+
+        # 3.1 Top-N Long-Only (Equal Weight)
+        print("Running Top-N Long-Only (Equal Weight)...")
+        pf_long_equal = backtester.run_top_n_strategy(
             top_n=20, 
-            rebalance_freq='M' # Monthly rebalance
+            rebalance_freq='M',
+            weighting='equal'
         )
+        results['Long-Only (Equal)'] = pf_long_equal
+
+        # 3.2 Top-N Long-Only (Factor Weight)
+        print("Running Top-N Long-Only (Factor Weight)...")
+        pf_long_factor = backtester.run_top_n_strategy(
+            top_n=20, 
+            rebalance_freq='M',
+            weighting='factor'
+        )
+        results['Long-Only (Factor)'] = pf_long_factor
+
+        # 3.3 Long-Short (Equal Weight)
+        print("Running Long-Short (Equal Weight)...")
+        pf_ls_equal = backtester.run_long_short_strategy(
+            top_n=20, 
+            rebalance_freq='M',
+            weighting='equal'
+        )
+        results['Long-Short (Equal)'] = pf_ls_equal
+
+        # 3.4 Long-Short (Factor Weight)
+        print("Running Long-Short (Factor Weight)...")
+        pf_ls_factor = backtester.run_long_short_strategy(
+            top_n=20, 
+            rebalance_freq='M',
+            weighting='factor'
+        )
+        results['Long-Short (Factor)'] = pf_ls_factor
+
+        # 3.5 Sector-Neutral Top-N (using rank_cross_sector)
+        print("Running Sector-Neutral Top-N...")
+        # Load rank_cross_sector
+        df_rank_sector = load_factor_values_wide(
+            con, 
+            factor_name=factor_name,
+            start_date="2017-01-01",
+            value_col="rank_cross_sector"
+        )
+        if not df_rank_sector.empty:
+            bt_sector = FactorBacktester(prices=df_ohlcv, factor_values=df_rank_sector)
+            pf_sector = bt_sector.run_top_n_strategy(
+                top_n=5, # Top 5 per sector (approx)
+                rebalance_freq='M',
+                weighting='equal',
+                input_is_rank=True
+            )
+            results['Sector-Neutral Top-5'] = pf_sector
+        else:
+            print("Warning: rank_cross_sector is empty.")
+
+        # 3.6 Threshold Strategy (using zscore_cross)
+        print("Running Threshold Strategy (Z-Score > 1.5)...")
+        # Load zscore_cross
+        df_zscore = load_factor_values_wide(
+            con, 
+            factor_name=factor_name,
+            start_date="2017-01-01",
+            value_col="zscore_cross"
+        )
+        if not df_zscore.empty:
+            bt_zscore = FactorBacktester(prices=df_ohlcv, factor_values=df_zscore)
+            pf_threshold = bt_zscore.run_threshold_strategy(
+                upper_threshold=1.5,
+                lower_threshold=-1.5,
+                rebalance_freq='M'
+            )
+            results['Threshold (Z>1.5)'] = pf_threshold
+        else:
+            print("Warning: zscore_cross is empty.")
 
         # 4. Analyze Results
-        print("\n=== Backtest Results ===")
-        print(f"Total Return: {pf.total_return():.2%}")
-        print(f"Sharpe Ratio: {pf.sharpe_ratio():.2f}")
-        print(f"Max Drawdown: {pf.max_drawdown():.2%}")
-        print(f"Alpha: {pf.alpha():.2f}")
-        print(f"Beta: {pf.beta():.2f}")
-        print(f"Total Profit: {pf.total_profit():.2f}")
+        print("\n=== Backtest Comparison ===")
+        print(f"{'Strategy':<25} | {'Total Return':<15} | {'Sharpe':<10} | {'Max DD':<10} | {'Alpha':<10} | {'Beta':<10}")
+        print("-" * 90)
+        
+        for name, pf in results.items():
+            print(f"{name:<25} | {pf.total_return():<15.2%} | {pf.sharpe_ratio():<10.2f} | {pf.max_drawdown():<10.2%} | {pf.alpha():<10.2f} | {pf.beta():<10.2f}")
 
-        # 5. Trade Records
-        print("\n=== Trade Records (Top 10) ===")
-        trades_df = pf.trades.records_readable
+        # 5. Save Trade Records for the best strategy (e.g. Long-Short Factor)
+        best_pf = results['Long-Short (Factor)']
+        print(f"\nTotal Trades: {best_pf.trades.count()}")
+        print("\n=== Trade Records (Long-Short Factor - Top 10) ===")
+        trades_df = best_pf.trades.records_readable
         print(trades_df.head(10))
         
         output_path = ROOT / "data" / "trade_records.csv"
         trades_df.to_csv(output_path)
         print(f"\nFull trade records saved to: {output_path}")
+
+        # 6. Save Position Records (Aggregated Trades)
+        print("\n=== Position Records (Top 10) ===")
+        positions_df = best_pf.positions.records_readable
+        print(positions_df.head(10))
+        
+        pos_output_path = ROOT / "data" / "position_records.csv"
+        positions_df.to_csv(pos_output_path)
+        print(f"Position records saved to: {pos_output_path}")
+
+        # 7. Save Daily Holdings (Asset Values)
+        # We'll save the value of each asset over time
+        print("\nSaving Daily Holdings...")
+        # Use group_by=False to get per-asset value instead of total portfolio value
+        daily_holdings = best_pf.asset_value(group_by=False)
+        
+        # Filter to remove columns (assets) that were never held to save space
+        if isinstance(daily_holdings, pd.DataFrame):
+            daily_holdings = daily_holdings.loc[:, (daily_holdings != 0).any(axis=0)]
+        
+        holdings_output_path = ROOT / "data" / "daily_holdings.csv"
+        daily_holdings.to_csv(holdings_output_path)
+        print(f"Daily holdings saved to: {holdings_output_path}")
 
     except Exception as e:
         print(f"Error: {e}")

@@ -44,20 +44,23 @@ def postprocess_factor(
         df_factor.loc[~mask_pos, "value"] = np.nan
 
     # === Winsorize ===
-    df_factor["value"] = df_factor.groupby("trade_date")["value"].transform(
-        lambda x: _winsorize_series(x)
-    ) 
+    if enable_winsorize:
+        df_factor["value"] = df_factor.groupby("trade_date")["value"].transform(
+            lambda x: _winsorize_series(x)
+        ) 
 
     # === Whole Market Z-score ===
-    df_factor["zscore_cross"] = (
-        df_factor.groupby("trade_date")["value"].transform(_zscore)
-    )
+    if enable_zscore:
+        df_factor["zscore_cross"] = (
+            df_factor.groupby("trade_date")["value"].transform(_zscore)
+        )
 
     # === Whole Market rank (%) ===
-    df_factor["rank_cross"] = (
-        df_factor.groupby("trade_date")["value"]
-                            .rank(method="first", pct=True)
-    )
+    if enable_rank:
+        df_factor["rank_cross"] = (
+            df_factor.groupby("trade_date")["value"]
+                                .rank(method="first", pct=True)
+        )
 
     # Join securities' sectors
     if enable_sector_neutral:
