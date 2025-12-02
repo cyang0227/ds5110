@@ -21,6 +21,8 @@ DB_PATH = str(project_root / "data" / "warehouse" / "data.duckdb")
 
 @st.cache_resource
 def get_db_connection():
+    if not os.path.exists(DB_PATH):
+        return None
     return duckdb.connect(DB_PATH, read_only=True)
 
 # Page Config
@@ -31,23 +33,91 @@ st.set_page_config(
 )
 
 # Sidebar
-st.sidebar.title("📊 DS5110 – Factor Tool")
-page = st.sidebar.radio("Navigation", [
-    "Stock Analysis",
-    "Technical Backtest",
-    "Factor Backtest",
-    "Data Management"
-])
+st.sidebar.title("📊 DS5110 – Factor-based Stock Analysis Tool")
+
+# Custom CSS for Sidebar Styling
+st.markdown("""
+<style>
+    /* Target the sidebar radio group */
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
+        gap: 12px;
+    }
+    
+    /* Style each radio option (label) */
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label {
+        background-color: transparent;
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        border-radius: 10px;
+        padding: 12px 15px;
+        transition: all 0.2s ease-in-out;
+        margin-bottom: 4px;
+        cursor: pointer;
+    }
+
+    /* Hover effect */
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover {
+        background-color: rgba(128, 128, 128, 0.1);
+        border-color: rgba(128, 128, 128, 0.4);
+        transform: translateX(4px);
+    }
+
+    /* Active/Checked state using :has() selector */
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:has(input:checked) {
+        background-color: #FF4B4B; /* Streamlit Primary Color */
+        border-color: #FF4B4B;
+        color: white;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    /* Force text color to white when selected */
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:has(input:checked) * {
+        color: white !important;
+    }
+
+    /* Hide the default radio circle */
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label > div:first-child {
+        display: none;
+    }
+    
+    /* Increase font size for the text */
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label > div[data-testid="stMarkdownContainer"] p {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Navigation Options with Emojis
+page_map = {
+    "📈 Stock Analysis": "Stock Analysis",
+    "🛠️ Technical Backtest": "Technical Backtest",
+    "🧪 Factor Backtest": "Factor Backtest",
+    "🗄️ Data Management": "Data Management"
+}
+
+selection = st.sidebar.radio(
+    "Navigation", 
+    list(page_map.keys()), 
+    label_visibility="collapsed"
+)
+
+# Map back to internal page name
+page = page_map[selection]
 
 # Helpers
 @st.cache_data
 def load_tickers():
     con = get_db_connection()
+    if con is None:
+        return pd.DataFrame()
     return get_all_tickers(con)
 
 @st.cache_data
 def load_factors():
     con = get_db_connection()
+    if con is None:
+        return pd.DataFrame()
     return get_all_factors(con)
 
 # ==========================================
@@ -58,7 +128,8 @@ if page == "Stock Analysis":
     
     tickers_df = load_tickers()
     if tickers_df.empty:
-        st.error("No tickers found in database. Please run ETL first.")
+        st.warning("⚠️ Database not found or empty. Please go to **Data Management** to run the ETL pipeline.")
+        st.info("Navigate to: Sidebar > Data Management > Run ETL Pipeline")
     else:
         # Ticker Selector
         ticker_options = tickers_df.apply(lambda x: f"{x['symbol']} - {x['name']}", axis=1).tolist()
@@ -114,13 +185,13 @@ if page == "Stock Analysis":
                     fig.add_trace(go.Scatter(x=df_plot.index, y=sma200, mode='lines', name='SMA 200'))
 
                 fig.update_layout(title=f"{selected_symbol} Price Chart", xaxis_title="Date", yaxis_title="Price")
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
                 
                 # Volume
                 fig_vol = go.Figure()
                 fig_vol.add_trace(go.Bar(x=df_plot.index, y=df_plot['volume'], name='Volume'))
                 fig_vol.update_layout(title="Volume", xaxis_title="Date", yaxis_title="Volume", height=300)
-                st.plotly_chart(fig_vol, width='stretch')
+                st.plotly_chart(fig_vol, use_container_width=True)
                 
         except Exception as e:
             st.error(f"Error loading data: {e}")
@@ -133,7 +204,8 @@ elif page == "Technical Backtest":
     
     tickers_df = load_tickers()
     if tickers_df.empty:
-        st.error("No tickers found.")
+        st.warning("⚠️ Database not found or empty. Please go to **Data Management** to run the ETL pipeline.")
+        st.info("Navigate to: Sidebar > Data Management > Run ETL Pipeline")
     else:
         col1, col2 = st.columns(2)
         
@@ -213,7 +285,7 @@ elif page == "Technical Backtest":
             st.metric("Sharpe Ratio", f"{pf.sharpe_ratio():.2f}")
             st.metric("Max Drawdown", f"{pf.max_drawdown():.2%}")
             
-            st.plotly_chart(pf.plot(), width='stretch')
+            st.plotly_chart(pf.plot(), use_container_width=True)
             # Downloads
             st.subheader("Downloads")
             col_d1, col_d2 = st.columns(2)
@@ -257,7 +329,8 @@ elif page == "Factor Backtest":
     
     factors_df = load_factors()
     if factors_df.empty:
-        st.error("No factors found.")
+        st.warning("⚠️ Database not found or empty. Please go to **Data Management** to run the ETL pipeline.")
+        st.info("Navigate to: Sidebar > Data Management > Run ETL Pipeline")
     else:
         # Inputs
         col1, col2 = st.columns(2)
@@ -451,7 +524,7 @@ elif page == "Factor Backtest":
                             opacity=0.7
                         ))
             
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
             
             # =======================
             # Downloads
