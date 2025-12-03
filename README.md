@@ -34,11 +34,11 @@ This project is a comprehensive platform for **Quantitative Factor Investing**. 
 
 ### Prerequisites
 *   Python 3.13+
-*   Conda (recommended)
+*   Conda
 
 ### 1. Clone the Repository
 ```bash
-git clone <repository-url>
+git clone https://github.com/cyang0227/ds5110.git
 cd ds5110
 ```
 
