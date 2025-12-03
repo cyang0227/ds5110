@@ -51,22 +51,7 @@ CREATE TABLE IF NOT EXISTS prices (
 """)
 
 # ======================================================
-# 3. Table: corporate_actions
-# ======================================================
-con.execute("""
-CREATE TABLE IF NOT EXISTS corporate_actions (
-    security_id BIGINT,
-    action_date DATE,
-    action_type TEXT,
-    split_ratio DOUBLE,
-    cash_amount DOUBLE,
-    PRIMARY KEY (security_id, action_date, action_type),
-    FOREIGN KEY (security_id) REFERENCES securities(security_id)
-);
-""")
-
-# ======================================================
-# 4. Table: fundamentals
+# 3. Table: fundamentals
 # ======================================================
 con.execute("""
 CREATE TABLE IF NOT EXISTS fundamentals (
@@ -81,7 +66,7 @@ CREATE TABLE IF NOT EXISTS fundamentals (
 """)
 
 # ======================================================
-# 5. Table: factor_definitions
+# 4. Table: factor_definitions
 # ======================================================
 con.execute("""
 CREATE TABLE IF NOT EXISTS factor_definitions (
@@ -99,7 +84,7 @@ CREATE TABLE IF NOT EXISTS factor_definitions (
 """)
 
 # ======================================================
-# 6. Table: factor_values
+# 5. Table: factor_values
 # ======================================================
 con.execute("""
 CREATE TABLE IF NOT EXISTS factor_values (

@@ -72,12 +72,65 @@ class FactorBacktester:
                     if not cols.empty:
                         self.prices[k] = v[cols]
         
+    def _calculate_weights(
+        self, 
+        entries: pd.DataFrame, 
+        weighting: str = 'equal'
+    ) -> pd.DataFrame:
+        """
+        Calculate weights based on selected entries and weighting scheme.
+        """
+        if weighting == 'equal':
+            # Equal weight for selected stocks
+            weights = entries.astype(float).div(entries.sum(axis=1), axis=0)
+        elif weighting == 'factor':
+            # Weight proportional to factor value (absolute value)
+            # Use the factor values for the selected entries
+            selected_factors = self.factor_values.where(entries).abs()
+            weights = selected_factors.div(selected_factors.sum(axis=1), axis=0)
+        else:
+            raise ValueError(f"Unknown weighting scheme: {weighting}")
+            
+        return weights.fillna(0.0)
+
+    def _prepare_simulation_input(
+        self, 
+        weights: pd.DataFrame, 
+        rebalance_freq: str
+    ) -> pd.DataFrame:
+        """
+        Resample and align weights for simulation.
+        """
+        if rebalance_freq:
+            # Handle 'M' deprecation
+            freq = rebalance_freq
+            if freq == 'M':
+                freq = 'ME'
+            
+            # 1. Identify Rebalance Dates (Last trading day of the period)
+            rebalance_dates = self.close_prices.index.to_series().resample(freq).last()
+            
+            # 2. Select weights on these dates
+            valid_dates = rebalance_dates.dropna()
+            
+            valid_dates = valid_dates[valid_dates.isin(weights.index)]
+            
+            weights = weights.loc[valid_dates]
+            
+            # 3. Reindex back to daily to match prices
+            weights = weights.reindex(self.close_prices.index)
+            
+        return weights
+
     def run_top_n_strategy(
         self, 
         top_n: int = 20, 
         rebalance_freq: str = 'M',
+        weighting: str = 'equal',
         fees: float = 0.001,
-        slippage: float = 0.001
+        slippage: float = 0.001,
+        input_is_rank: bool = False,
+        benchmark_prices: pd.Series = None
     ) -> vbt.Portfolio:
         """
         Run a Top-N Long-Only strategy.
@@ -85,32 +138,29 @@ class FactorBacktester:
         Args:
             top_n: Number of stocks to hold.
             rebalance_freq: Rebalancing frequency ('D', 'W', 'M', 'Q').
+            weighting: 'equal' or 'factor'.
             fees: Transaction fees (e.g. 0.001 = 10bps).
             slippage: Slippage (e.g. 0.001 = 10bps).
+            input_is_rank: If True, treats factor_values as ranks (1=Best).
+            benchmark_prices: Optional Series of benchmark prices (e.g. SPY).
         """
-        # 1. Generate Ranks (Higher factor value = Higher rank)
-        # We assume Higher Factor Value is Better. If not, invert factor_values before passing.
-        ranks = self.factor_values.rank(axis=1, ascending=False)
+        # 1. Generate Ranks
+        if input_is_rank:
+            # Assume factor_values are already ranks (1 is best)
+            ranks = self.factor_values
+        else:
+            # Higher factor value = Higher rank (1 is best in our logic for selection)
+            # Standard rank(ascending=False) gives 1 to largest value.
+            ranks = self.factor_values.rank(axis=1, ascending=False)
         
         # 2. Generate Target Weights
         long_entries = ranks <= top_n
+        weights = self._calculate_weights(long_entries, weighting=weighting)
         
-        # Equal weight for selected stocks
-        weights = long_entries.astype(float).div(long_entries.sum(axis=1), axis=0)
-        weights = weights.fillna(0.0)
-        
-        # 3. Resample Weights for Rebalancing
-        # Take the last signal of the period and hold it until the next period
-        if rebalance_freq:
-            # Use 'ME' instead of 'M' if pandas version requires it, but 'M' is safer for older pandas
-            # The user saw a warning, so let's try to be safe. 
-            # If rebalance_freq is passed as 'M', we keep it.
-            weights = weights.resample(rebalance_freq).last()
-            # Reindex back to daily to match prices (forward fill the weights)
-            weights = weights.reindex(self.close_prices.index).ffill()
+        # 3. Resample Weights
+        weights = self._prepare_simulation_input(weights, rebalance_freq)
 
         # 4. Run Simulation
-        # from_weights is missing in this vbt version, use from_orders with targetpercent
         pf = vbt.Portfolio.from_orders(
             close=self.close_prices,
             size=weights,
@@ -118,8 +168,14 @@ class FactorBacktester:
             freq='1D',
             fees=fees,
             slippage=slippage,
-            group_by=True,      # Group all stocks into one portfolio
-            cash_sharing=True   # Share cash across all stocks
+            group_by=True,
+            cash_sharing=True,
+            init_cash=100000
         )
         
+        if benchmark_prices is not None:
+            pf._benchmark_close = benchmark_prices
+        
         return pf
+
+

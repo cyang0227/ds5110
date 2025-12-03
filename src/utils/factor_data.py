@@ -336,3 +336,31 @@ def load_factor_values_wide(
     df_wide.index = pd.to_datetime(df_wide.index)
 
     return df_wide
+
+
+# ===============================================
+# UI Helpers
+# ===============================================
+def get_all_tickers(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """
+    Get all available tickers from the securities table.
+    Returns DataFrame with columns: security_id, symbol, name, sector, industry
+    """
+    return con.execute("""
+        SELECT security_id, symbol, name, sector, industry 
+        FROM securities 
+        ORDER BY symbol
+    """).fetchdf()
+
+
+def get_all_factors(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """
+    Get all available factors from factor_definitions.
+    Returns DataFrame with columns: factor_id, name, category, description
+    """
+    return con.execute("""
+        SELECT factor_id, name, category, description 
+        FROM factor_definitions 
+        WHERE is_active = true
+        ORDER BY category, name
+    """).fetchdf()

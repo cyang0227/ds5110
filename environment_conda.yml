@@ -44,3 +44,4 @@ dependencies:
       - vectorbt==0.28.1
       - yfinance==0.2.66
       - streamlit==1.50.0
+      - anywidget
