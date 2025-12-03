@@ -369,6 +369,14 @@ elif page == "Factor Backtest":
         col_n1, col_n2 = st.columns(2)
         norm_mode = col_n1.radio("Normalization Mode", ["Market-Wide", "Sector-Neutral"], horizontal=True)
         score_type = col_n2.radio("Score Type", ["Z-Score", "Rank"], horizontal=True)
+
+        # Fees and Slippage
+        col_f1, col_f2 = st.columns(2)
+        fees_bps = col_f1.number_input("Trading Fees (bps)", min_value=0, max_value=500, value=10, step=1)
+        slippage_bps = col_f2.number_input("Slippage (bps)", min_value=0, max_value=500, value=10, step=1)
+        
+        fees = fees_bps / 10000.0
+        slippage = slippage_bps / 10000.0
         
         # Date Range
         col6, col7 = st.columns(2)
@@ -480,7 +488,9 @@ elif page == "Factor Backtest":
                                         top_n=top_n, 
                                         rebalance_freq=rebalance, 
                                         weighting=weighting,
-                                        benchmark_prices=benchmark_series
+                                        benchmark_prices=benchmark_series,
+                                        fees=fees,
+                                        slippage=slippage
                                     )
                                         
                                     st.session_state['factor_pf'] = pf
@@ -499,7 +509,6 @@ elif page == "Factor Backtest":
             st.dataframe(stats.astype(str))
             
             st.subheader("Equity Curve")
-            # Customize plot to avoid warnings about orders/trade_pnl on grouped data
             fig = pf.plot(subplots=['value'])
             
             # Manually add benchmark if available
