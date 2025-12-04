@@ -141,14 +141,12 @@ if page == "Stock Analysis":
         con = get_db_connection()
         try:
             # Load OHLCV for this specific ticker
-            # We use load_ohlcv_wide but restrict to one security_id
             df_wide = load_ohlcv_wide(con, security_ids=[selected_sid])
             
             if df_wide.empty:
                 st.warning(f"No price data found for {selected_symbol}")
             else:
                 # df_wide columns are MultiIndex (Variable, SecurityID)
-                # We need to flatten it for a single stock
                 df_stock = df_wide.xs(selected_sid, axis=1, level=1)
                 
                 # Date Range Filter
@@ -184,13 +182,34 @@ if page == "Stock Analysis":
                     sma200 = df_plot['close'].rolling(window=200).mean()
                     fig.add_trace(go.Scatter(x=df_plot.index, y=sma200, mode='lines', name='SMA 200'))
 
-                fig.update_layout(title=f"{selected_symbol} Price Chart", xaxis_title="Date", yaxis_title="Price")
+                # Calculate missing dates (breaks)
+                dt_all = pd.date_range(start=df_plot.index[0], end=df_plot.index[-1])
+                dt_obs = [d.strftime("%Y-%m-%d") for d in df_plot.index]
+                dt_breaks = [d.strftime("%Y-%m-%d") for d in dt_all if d.strftime("%Y-%m-%d") not in dt_obs]
+
+                fig.update_layout(
+                    title=f"{selected_symbol} Price Chart", 
+                    xaxis_title="Date", 
+                    yaxis_title="Price",
+                    xaxis_rangeslider_visible=False,
+                    xaxis_rangebreaks=[
+                        dict(values=dt_breaks) # hide weekends and holidays
+                    ]
+                )
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # Volume
                 fig_vol = go.Figure()
                 fig_vol.add_trace(go.Bar(x=df_plot.index, y=df_plot['volume'], name='Volume'))
-                fig_vol.update_layout(title="Volume", xaxis_title="Date", yaxis_title="Volume", height=300)
+                fig_vol.update_layout(
+                    title="Volume", 
+                    xaxis_title="Date", 
+                    yaxis_title="Volume", 
+                    height=300,
+                    xaxis_rangebreaks=[
+                        dict(values=dt_breaks) # hide weekends and holidays
+                    ]
+                )
                 st.plotly_chart(fig_vol, use_container_width=True)
                 
         except Exception as e:
@@ -338,7 +357,7 @@ elif page == "Technical Backtest":
                 
                 fig_sma.update_layout(title=f"SMA Crossover ({fast}, {slow})", xaxis_title="Date", yaxis_title="Price", height=400)
                 st.plotly_chart(fig_sma, use_container_width=True)
-                
+
             # Downloads
             st.subheader("Downloads")
             col_d1, col_d2 = st.columns(2)
@@ -492,9 +511,6 @@ elif page == "Factor Backtest":
                             factor_vals = combined_factor_vals
                             
                             # 2. Load Price Data (All stocks that have factor data)
-                            # We can just load all prices for simplicity or intersect
-                            # For now, load all prices (might be heavy, but safe)
-                            # Optimization: Get SIDs from factor_vals columns
                             sids = factor_vals.columns.tolist()
                             prices_wide = load_ohlcv_wide(con, security_ids=sids)
                             
@@ -503,7 +519,6 @@ elif page == "Factor Backtest":
                             else:
                                 # Extract close prices
                                 # prices_wide is (Variable, SecurityID)
-                                # We want (Date, SecurityID)
                                 close_prices = prices_wide.xs('adj_close', axis=1, level=0)
                                 
                                 # Filter by date
