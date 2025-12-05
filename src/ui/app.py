@@ -33,7 +33,7 @@ st.set_page_config(
 )
 
 # Sidebar
-st.sidebar.title("📊 DS5110 – Factor-based Stock Analysis Tool")
+st.sidebar.title("DS5110 – Factor-based Stock Analysis Tool")
 
 # Custom CSS for Sidebar Styling
 st.markdown("""
@@ -90,10 +90,10 @@ st.markdown("""
 
 # Navigation Options with Emojis
 page_map = {
-    "📈 Stock Analysis": "Stock Analysis",
-    "🛠️ Technical Backtest": "Technical Backtest",
-    "🧪 Factor Backtest": "Factor Backtest",
-    "🗄️ Data Management": "Data Management"
+    "Stock Analysis": "Stock Analysis",
+    "Technical Backtest": "Technical Backtest",
+    "Factor Backtest": "Factor Backtest",
+    "Data Management": "Data Management"
 }
 
 selection = st.sidebar.radio(
@@ -124,11 +124,11 @@ def load_factors():
 # Page: Stock Analysis
 # ==========================================
 if page == "Stock Analysis":
-    st.title("📈 Stock Analysis")
+    st.title("Stock Analysis")
     
     tickers_df = load_tickers()
     if tickers_df.empty:
-        st.warning("⚠️ Database not found or empty. Please go to **Data Management** to run the ETL pipeline.")
+        st.warning("Database not found or empty. Please go to **Data Management** to run the ETL pipeline.")
         st.info("Navigate to: Sidebar > Data Management > Run ETL Pipeline")
     else:
         # Ticker Selector
@@ -141,14 +141,12 @@ if page == "Stock Analysis":
         con = get_db_connection()
         try:
             # Load OHLCV for this specific ticker
-            # We use load_ohlcv_wide but restrict to one security_id
             df_wide = load_ohlcv_wide(con, security_ids=[selected_sid])
             
             if df_wide.empty:
                 st.warning(f"No price data found for {selected_symbol}")
             else:
                 # df_wide columns are MultiIndex (Variable, SecurityID)
-                # We need to flatten it for a single stock
                 df_stock = df_wide.xs(selected_sid, axis=1, level=1)
                 
                 # Date Range Filter
@@ -184,13 +182,34 @@ if page == "Stock Analysis":
                     sma200 = df_plot['close'].rolling(window=200).mean()
                     fig.add_trace(go.Scatter(x=df_plot.index, y=sma200, mode='lines', name='SMA 200'))
 
-                fig.update_layout(title=f"{selected_symbol} Price Chart", xaxis_title="Date", yaxis_title="Price")
+                # Calculate missing dates (breaks)
+                dt_all = pd.date_range(start=df_plot.index[0], end=df_plot.index[-1])
+                dt_obs = [d.strftime("%Y-%m-%d") for d in df_plot.index]
+                dt_breaks = [d.strftime("%Y-%m-%d") for d in dt_all if d.strftime("%Y-%m-%d") not in dt_obs]
+
+                fig.update_layout(
+                    title=f"{selected_symbol} Price Chart", 
+                    xaxis_title="Date", 
+                    yaxis_title="Price",
+                    xaxis_rangeslider_visible=False,
+                    xaxis_rangebreaks=[
+                        dict(values=dt_breaks) # hide weekends and holidays
+                    ]
+                )
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # Volume
                 fig_vol = go.Figure()
                 fig_vol.add_trace(go.Bar(x=df_plot.index, y=df_plot['volume'], name='Volume'))
-                fig_vol.update_layout(title="Volume", xaxis_title="Date", yaxis_title="Volume", height=300)
+                fig_vol.update_layout(
+                    title="Volume", 
+                    xaxis_title="Date", 
+                    yaxis_title="Volume", 
+                    height=300,
+                    xaxis_rangebreaks=[
+                        dict(values=dt_breaks) # hide weekends and holidays
+                    ]
+                )
                 st.plotly_chart(fig_vol, use_container_width=True)
                 
         except Exception as e:
@@ -200,11 +219,11 @@ if page == "Stock Analysis":
 # Page: Technical Backtest
 # ==========================================
 elif page == "Technical Backtest":
-    st.title("🛠️ Technical Backtest (Single Stock)")
+    st.title("Technical Backtest (Single Stock)")
     
     tickers_df = load_tickers()
     if tickers_df.empty:
-        st.warning("⚠️ Database not found or empty. Please go to **Data Management** to run the ETL pipeline.")
+        st.warning("Database not found or empty. Please go to **Data Management** to run the ETL pipeline.")
         st.info("Navigate to: Sidebar > Data Management > Run ETL Pipeline")
     else:
         col1, col2 = st.columns(2)
@@ -274,6 +293,7 @@ elif page == "Technical Backtest":
                         st.session_state['tech_pf'] = pf
                         st.session_state['tech_symbol'] = symbol
                         st.session_state['tech_strategy'] = strategy
+                        st.session_state['tech_params'] = params
 
         if 'tech_pf' in st.session_state:
             pf = st.session_state['tech_pf']
@@ -286,6 +306,58 @@ elif page == "Technical Backtest":
             st.metric("Max Drawdown", f"{pf.max_drawdown():.2%}")
             
             st.plotly_chart(pf.plot(), use_container_width=True)
+            
+            # Technical Indicator Charts
+            st.subheader("Technical Indicators")
+            
+            if strategy == "MACD":
+                # Calculate MACD for plotting
+                macd_ind = vbt.MACD.run(pf.close)
+                
+                fig_macd = go.Figure()
+                fig_macd.add_trace(go.Scatter(x=macd_ind.macd.index, y=macd_ind.macd, mode='lines', name='MACD'))
+                fig_macd.add_trace(go.Scatter(x=macd_ind.signal.index, y=macd_ind.signal, mode='lines', name='Signal'))
+                fig_macd.add_trace(go.Bar(x=macd_ind.hist.index, y=macd_ind.hist, name='Histogram'))
+                
+                fig_macd.update_layout(title="MACD (12, 26, 9)", xaxis_title="Date", yaxis_title="Value", height=400)
+                st.plotly_chart(fig_macd, use_container_width=True)
+                
+            elif strategy == "RSI":
+                params = st.session_state.get('tech_params', {'window': 14, 'lower': 30, 'upper': 70})
+                window = params.get('window', 14)
+                lower = params.get('lower', 30)
+                upper = params.get('upper', 70)
+                
+                rsi_ind = vbt.RSI.run(pf.close, window=window)
+                
+                fig_rsi = go.Figure()
+                fig_rsi.add_trace(go.Scatter(x=rsi_ind.rsi.index, y=rsi_ind.rsi, mode='lines', name='RSI'))
+                
+                # Add Thresholds
+                fig_rsi.add_hline(y=upper, line_dash="dash", line_color="red", annotation_text="Overbought")
+                fig_rsi.add_hline(y=lower, line_dash="dash", line_color="green", annotation_text="Oversold")
+                
+                fig_rsi.update_layout(title=f"RSI ({window})", xaxis_title="Date", yaxis_title="Value", yaxis_range=[0, 100], height=400)
+                st.plotly_chart(fig_rsi, use_container_width=True)
+                
+            elif strategy == "SMA Crossover":
+                # Retrieve params
+                params = st.session_state.get('tech_params', {'fast': 20, 'slow': 50})
+                fast = params.get('fast', 20)
+                slow = params.get('slow', 50)
+                
+                # Calculate SMAs
+                fast_ma = vbt.MA.run(pf.close, window=fast)
+                slow_ma = vbt.MA.run(pf.close, window=slow)
+                
+                fig_sma = go.Figure()
+                fig_sma.add_trace(go.Scatter(x=pf.close.index, y=pf.close, mode='lines', name='Close Price', line=dict(color='gray', width=1)))
+                fig_sma.add_trace(go.Scatter(x=fast_ma.ma.index, y=fast_ma.ma, mode='lines', name=f'SMA {fast}', line=dict(color='orange')))
+                fig_sma.add_trace(go.Scatter(x=slow_ma.ma.index, y=slow_ma.ma, mode='lines', name=f'SMA {slow}', line=dict(color='blue')))
+                
+                fig_sma.update_layout(title=f"SMA Crossover ({fast}, {slow})", xaxis_title="Date", yaxis_title="Price", height=400)
+                st.plotly_chart(fig_sma, use_container_width=True)
+
             # Downloads
             st.subheader("Downloads")
             col_d1, col_d2 = st.columns(2)
@@ -325,11 +397,11 @@ elif page == "Technical Backtest":
 # Page: Factor Backtest
 # ==========================================
 elif page == "Factor Backtest":
-    st.title("🧪 Factor Backtest (Portfolio)")
+    st.title("Factor Backtest (Portfolio)")
     
     factors_df = load_factors()
     if factors_df.empty:
-        st.warning("⚠️ Database not found or empty. Please go to **Data Management** to run the ETL pipeline.")
+        st.warning("Database not found or empty. Please go to **Data Management** to run the ETL pipeline.")
         st.info("Navigate to: Sidebar > Data Management > Run ETL Pipeline")
     else:
         # Inputs
@@ -353,7 +425,7 @@ elif page == "Factor Backtest":
             
             # Validation
             if abs(total_weight - 1.0) > 0.01:
-                st.warning(f"⚠️ Total Weight is {total_weight:.2f}. It will be normalized to 1.0 automatically.")
+                st.warning(f"Total Weight is {total_weight:.2f}. It will be normalized to 1.0 automatically.")
                 # Normalize weights for calculation
                 for f in factor_weights:
                     factor_weights[f] = factor_weights[f] / total_weight
@@ -439,9 +511,6 @@ elif page == "Factor Backtest":
                             factor_vals = combined_factor_vals
                             
                             # 2. Load Price Data (All stocks that have factor data)
-                            # We can just load all prices for simplicity or intersect
-                            # For now, load all prices (might be heavy, but safe)
-                            # Optimization: Get SIDs from factor_vals columns
                             sids = factor_vals.columns.tolist()
                             prices_wide = load_ohlcv_wide(con, security_ids=sids)
                             
@@ -450,22 +519,12 @@ elif page == "Factor Backtest":
                             else:
                                 # Extract close prices
                                 # prices_wide is (Variable, SecurityID)
-                                # We want (Date, SecurityID)
                                 close_prices = prices_wide.xs('adj_close', axis=1, level=0)
                                 
-                                # Filter by date
-                                # Align factor_vals and close_prices to the selected date range
-                                # Note: factor_vals index is datetime, start_date is date.
-                                # Already filtered factor_vals above, but ensure alignment
-                                
-                                # Also filter prices to match (engine does intersection, but good to reduce size early)
+                                # filter prices to match
                                 close_prices = close_prices.loc[close_prices.index.date >= start_date]
                                 close_prices = close_prices.loc[close_prices.index.date <= end_date]
-                                
-                                # Reindex factor_vals to match close_prices index (intersection)
-                                common_index = close_prices.index.intersection(factor_vals.index)
-                                close_prices = close_prices.loc[common_index]
-                                factor_vals = factor_vals.loc[common_index]
+                            
                                 
                                 if factor_vals.empty:
                                     st.error("No factor data for selected date range after alignment.")
@@ -505,7 +564,6 @@ elif page == "Factor Backtest":
             
             st.subheader("Performance Metrics")
             stats = pf.stats()
-            # Fix for PyArrow serialization error with mixed types
             st.dataframe(stats.astype(str))
             
             st.subheader("Equity Curve")
@@ -655,7 +713,7 @@ elif page == "Factor Backtest":
 # Page: Data Management
 # ==========================================
 elif page == "Data Management":
-    st.title("🗄️ Data Management")
+    st.title("Data Management")
     
     st.header("1. ETL Pipeline (Data Ingestion)")
     
@@ -666,7 +724,7 @@ elif page == "Data Management":
     only_fundamentals = col2.checkbox("Only Fundamentals")
     incremental = st.checkbox("Incremental Update (Faster)")
     
-    if st.button("🚀 Run ETL Pipeline"):
+    if st.button("Run ETL Pipeline"):
         # Close DB connection to release lock
         try:
             con = get_db_connection()
@@ -718,7 +776,7 @@ elif page == "Data Management":
     st.header("2. Factor Pipeline (Calculation)")
     st.write("Calculate and store factors (etc. Momentum, Value) into the database.")
     
-    if st.button("🚀 Run Factor Pipeline"):
+    if st.button("Run Factor Pipeline"):
         # Close DB connection to release lock
         try:
             con = get_db_connection()

@@ -61,7 +61,7 @@ ds5110/
   - `fundamentals/fundamentals_clean.parquet` is the long-format metrics table generated from the normalized financial statements.  
   - `securities_with_gics.csv` enriches the index list with Yahoo! sector/industry tags.
 
-- **`data/warehouse/`** — DuckDB analytical store (`data.duckdb`). Tables include `securities`, `prices`, `fundamentals`, `corporate_actions`, `factor_definitions`, and `factor_values`. All `load_*.py` scripts target this file using upserts.
+- **`data/warehouse/`** — DuckDB analytical store (`data.duckdb`). Tables include `securities`, `prices`, `fundamentals`, `factor_definitions`, and `factor_values`. All `load_*.py` scripts target this file using upserts.
 
 ---
 
