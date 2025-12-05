@@ -44,29 +44,29 @@ class FactorBacktester:
             self.close_prices = prices
 
         # Align Data (Intersection of Dates and Assets)
-        # 1. Calculate common index and columns
-        common_dates = self.close_prices.index.intersection(self.factor_values.index)
+        # 1. Calculate common columns (Assets)
         common_assets = self.close_prices.columns.intersection(self.factor_values.columns)
         
         # 2. Align close_prices and factor_values
-        self.close_prices = self.close_prices.loc[common_dates, common_assets]
-        self.factor_values = self.factor_values.loc[common_dates, common_assets]
+        # Align factor_values to close_prices (Left Join)
+        self.close_prices = self.close_prices.loc[:, common_assets]
+        self.factor_values = self.factor_values.reindex(index=self.close_prices.index, columns=common_assets)
         
         # 3. Align original prices (handle MultiIndex)
         if isinstance(self.prices, pd.DataFrame):
             if isinstance(self.prices.columns, pd.MultiIndex):
                 # MultiIndex: (Field, Security)
                 # Slice: All dates, (All fields, Common securities)
-                self.prices = self.prices.loc[common_dates, pd.IndexSlice[:, common_assets]]
+                self.prices = self.prices.loc[self.close_prices.index, pd.IndexSlice[:, common_assets]]
             else:
                 # Single Index
-                self.prices = self.prices.loc[common_dates, common_assets]
+                self.prices = self.prices.loc[self.close_prices.index, common_assets]
         elif isinstance(self.prices, dict):
             # If dict, align each dataframe inside
             for k, v in self.prices.items():
                 if isinstance(v, pd.DataFrame):
                     # Intersect dates
-                    v = v.loc[v.index.intersection(common_dates)]
+                    v = v.loc[v.index.intersection(self.close_prices.index)]
                     # Intersect columns if they look like assets
                     cols = v.columns.intersection(common_assets)
                     if not cols.empty:

@@ -521,19 +521,10 @@ elif page == "Factor Backtest":
                                 # prices_wide is (Variable, SecurityID)
                                 close_prices = prices_wide.xs('adj_close', axis=1, level=0)
                                 
-                                # Filter by date
-                                # Align factor_vals and close_prices to the selected date range
-                                # Note: factor_vals index is datetime, start_date is date.
-                                # Already filtered factor_vals above, but ensure alignment
-                                
-                                # Also filter prices to match (engine does intersection, but good to reduce size early)
+                                # filter prices to match
                                 close_prices = close_prices.loc[close_prices.index.date >= start_date]
                                 close_prices = close_prices.loc[close_prices.index.date <= end_date]
-                                
-                                # Reindex factor_vals to match close_prices index (intersection)
-                                common_index = close_prices.index.intersection(factor_vals.index)
-                                close_prices = close_prices.loc[common_index]
-                                factor_vals = factor_vals.loc[common_index]
+                            
                                 
                                 if factor_vals.empty:
                                     st.error("No factor data for selected date range after alignment.")
@@ -573,7 +564,6 @@ elif page == "Factor Backtest":
             
             st.subheader("Performance Metrics")
             stats = pf.stats()
-            # Fix for PyArrow serialization error with mixed types
             st.dataframe(stats.astype(str))
             
             st.subheader("Equity Curve")
