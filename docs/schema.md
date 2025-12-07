@@ -34,21 +34,7 @@
 
 ---
 
-## 3. `corporate_actions`
-| Attribute | Type | Description |
-|------------|------|-------------|
-| **security_id** | BIGINT (FK → securities) | Stock identifier. |
-| **action_date** | DATE | Effective date of the corporate action. |
-| **action_type** | TEXT | ‘split’ or ‘dividend’. |
-| split_ratio | DOUBLE | Split ratio (e.g., 2.0 = 2-for-1). |
-| cash_amount | DOUBLE | Cash dividend per share. |
-
-**Primary Key:** (`security_id`, `action_date`, `action_type`)  
-**Purpose:** Records splits and dividends used for price adjustment.
-
----
-
-## 4. `fundamentals`
+## 3. `fundamentals`
 | Attribute | Type | Description |
 |---|---|---|
 | **security_id** | BIGINT (FK → securities) | Stock identifier. |
@@ -62,7 +48,7 @@
 
 ---
 
-## 5. `factor_definitions`
+## 4. `factor_definitions`
 | Attribute | Type | Description |
 |------------|------|-------------|
 | **factor_id** | BIGINT (PK) | Unique identifier for each factor. |
@@ -80,7 +66,7 @@
 
 ---
 
-## 6. `factor_values`
+## 5. `factor_values`
 | Attribute | Type | Description |
 |------------|------|-------------|
 | **security_id** | BIGINT (FK → securities) | Stock identifier. |
@@ -88,9 +74,11 @@
 | **factor_id** | BIGINT (FK → factor_definitions) | Factor identifier. |
 | value | DOUBLE | Raw factor value. |
 | zscore_cross | DOUBLE | Cross-sectional z-score (standardized per date). |
-| rank_cross | INTEGER | Cross-sectional rank (per date). |
+| rank_cross | DOUBLE | Cross-sectional rank (per date). |
 | calc_run_id | TEXT | Computation run ID (timestamp or UUID). |
 | updated_at | TIMESTAMP | Last updated timestamp. |
+| zscore_cross_sector | DOUBLE | Cross-sectional z-score (standardized per date) by sector. |
+| rank_cross_sector | DOUBLE | Cross-sectional rank (per date) by sector. |
 
 **Primary Key:** (`security_id`, `trade_date`, `factor_id`)  
 **Purpose:** Stores computed factor results in long-form format (one row = one stock × date × factor).

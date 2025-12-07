@@ -73,7 +73,10 @@ streamlit run src/ui/app.py
 Access the app at `http://localhost:8501`.
 
 ### Alternative Database Download
-The whole pipeline can be time-consuming (20+ minutes), if you have difficulty running ETL pipeline, you can download the database from [here](https://drive.google.com/file/d/1LmBh74O5lc4wVY_M3c-I8l4fBvY_38Ol/view?usp=drive_link), and place it in the `data/warehouse` directory.
+The whole pipeline can be time-consuming (15+ minutes), if you have difficulty running ETL pipeline, you can download the database from [here](https://drive.google.com/file/d/1LmBh74O5lc4wVY_M3c-I8l4fBvY_38Ol/view?usp=drive_link), and place it in the `data/warehouse` directory.
+
+### An AWS EC2 Instance of the app
+You can also access the app at [here](http://44.220.64.89:8501/).
 
 ## 📂 Project Structure
 
